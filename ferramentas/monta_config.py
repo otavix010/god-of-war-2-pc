@@ -13,8 +13,56 @@ def lista_stubs(toml_txt):
     return list(d.get('general', {}).get('stubs', []))
 
 
+def elfs_embutidos(caminho):
+    """Faixas (endereço virtual) de ELFs guardados dentro do executável, como os módulos do IOP (.IRX) que o jogo manda
+    por SifLoadModuleBuffer: são dados, não código do EE. O Dirge of Cerberus tem um de 11 KB e o Ghidra desmontou
+    83 "funções" nele (instruções inválidas e uma função de 88 KB)."""
+    import struct
+    d = open(caminho, 'rb').read()
+    if d[:4] != b'\x7fELF':
+        return []
+    phoff, = struct.unpack_from('<I', d, 0x1c)
+    phent, phnum = struct.unpack_from('<HH', d, 0x2a)
+    segs = []
+    for k in range(phnum):
+        t, of, va, pa, fs = struct.unpack_from('<5I', d, phoff + k * phent)
+        if t == 1 and fs:
+            segs.append((of, va, fs))
+    faixas = []
+    i = d.find(b'\x7fELF', 1)
+    while i >= 0:
+        # só cabeçalho de verdade (32 bits, little-endian, MIPS, versão 1): não uma string "\x7fELF" de um carregador
+        if d[i + 4:i + 7] != b'\x01\x01\x01' or d[i + 18:i + 20] != b'\x08\x00':
+            i = d.find(b'\x7fELF', i + 1)
+            continue
+        try:
+            shoff, = struct.unpack_from('<I', d, i + 0x20)
+            shent, shnum = struct.unpack_from('<HH', d, i + 0x2e)
+            phoff2, = struct.unpack_from('<I', d, i + 0x1c)
+            phent2, phnum2 = struct.unpack_from('<HH', d, i + 0x2a)
+            fim = max(shoff + shnum * shent, phoff2 + phnum2 * phent2)
+            for k in range(shnum):
+                nm, tp, fl, ad, of, sz = struct.unpack_from('<6I', d, i + shoff + k * shent)
+                if tp != 8:  # SHT_NOBITS não ocupa o arquivo
+                    fim = max(fim, of + sz)
+            for k in range(phnum2):
+                t, of, va, pa, fs = struct.unpack_from('<5I', d, i + phoff2 + k * phent2)
+                fim = max(fim, of + fs)
+        except struct.error:
+            fim = 0
+        for of, va, fs in segs:
+            if of <= i < of + fs and 0 < fim < 16 << 20:
+                faixas.append((va + i - of, va + min(i + fim, of + fs) - of))
+        i = d.find(b'\x7fELF', i + 1)
+    return faixas
+
+
 def main():
     pasta, elf = sys.argv[1], sys.argv[2]
+    embutidos = elfs_embutidos(os.path.join(pasta, elf))
+    dentro_embutido = lambda a: any(x <= a < y for x, y in embutidos)
+    if embutidos:
+        print('  ~ %d ELFs embutidos (dados, não código): %s' % (len(embutidos), ' '.join('0x%X-0x%X' % f for f in embutidos)))
     an = open(os.path.join(pasta, 'analisador.toml'), encoding='utf-8').read()
     gh = open(os.path.join(pasta, 'ghidra_config.toml'), encoding='utf-8').read()
     s_an, s_gh = lista_stubs(an), lista_stubs(gh)
@@ -84,6 +132,8 @@ def main():
     end_stubs = sorted(int(s.split('@', 1)[1], 16) for s in stubs if '@' in s)
     nome_stub = {int(s.split('@', 1)[1], 16): s.split('@', 1)[0] for s in stubs if '@' in s}
     extras_stub = []
+    tiradas_emb = []
+    tiradas_grandes = []
     inicios_csv = set()
     with open(os.path.join(pasta, 'ghidra_funcoes.csv'), encoding='utf-8') as ent:
         for linha in ent:
@@ -96,6 +146,19 @@ def main():
             partes = linha.rstrip('\r\n').split(',')
             if i and len(partes) >= 4 and partes[1].startswith('0x') and partes[3].strip().isdigit():
                 ini, fim, tam = int(partes[1], 16), int(partes[2], 16), int(partes[3])
+                if dentro_embutido(ini):
+                    tiradas_emb.append(partes[0])
+                    continue
+                # "entry_" do Ghidra (criada a partir de um ponteiro, sem símbolo) com mais de 64 KB: é dado desmontado.
+                # Onimusha 3: entry_00508340 (89 KB, até o fim exato do segmento) e entry_004fb930 (51 KB… essa fica)
+                # levaram um cl.exe a 18 GB. A maior função de verdade dos jogos testados tem 34 KB
+                if partes[0].startswith('entry_') and fim - ini > 0x10000:
+                    tiradas_grandes.append('%s (%d KB)' % (partes[0], (fim - ini) // 1024))
+                    continue
+                for x, y in embutidos:
+                    if ini < x < fim:
+                        fim = x
+                        partes[2] = '0x%08X' % fim
                 if tam > 0 and fim - ini > 4 * tam + 4096:
                     corrigidas.append('%s (%d→%d bytes)' % (partes[0], fim - ini, tam))
                     fim = ini + tam
@@ -116,6 +179,10 @@ def main():
             if a not in inicios and a not in inicios_csv:
                 inicios.add(a)
                 sai.write(e + '\n')
+    if tiradas_emb:
+        print('  - %d funções do Ghidra dentro de ELFs embutidos tiradas' % len(tiradas_emb))
+    if tiradas_grandes:
+        print('  - %d "entry_" do Ghidra com mais de 64 KB tiradas (dado desmontado): %s' % (len(tiradas_grandes), ' '.join(tiradas_grandes)))
     if corrigidas:
         print('  ~ %d funções com o fim inflado no CSV do Ghidra: %s' % (len(corrigidas), '; '.join(corrigidas)))
     if cortadas_stub:
@@ -139,15 +206,37 @@ def main():
     # funções que o analisador achou sozinho (sub_XXXXXXXX, p.ex. na lista de desempenho) e que o
     # Ghidra não criou: sem entrada própria viram "guest-branch:missing-target" (Ghost Rider 0x2C8080)
     inicios_gh = set()
+    fim_gh = 0
     for linha in open(os.path.join(pasta, 'ghidra_funcoes.csv'), encoding='utf-8'):
         partes = linha.split(',')
-        if len(partes) > 1 and partes[1].startswith('0x'):
+        if len(partes) > 2 and partes[1].startswith('0x'):
             inicios_gh.add(int(partes[1], 16))
+            if partes[2].startswith('0x'):
+                fim_gh = max(fim_gh, int(partes[2], 16))
     ja = set(ends) | set(int(e, 16) for e in re.findall(r'@0x([0-9A-Fa-f]+)', an))
     subs = sorted(set(int(s, 16) for s in re.findall(r'\bsub_([0-9A-F]{8})\b', an)) - inicios_gh - ja)
+    # Otavix (02/11): nada de "função" do analisador que iria mais de 64 KB até o próximo início conhecido: é dado.
+    # No Blade II ele "achou" funções em 0x25C310/0x404040 (área de dados, numa seção executável só) e cada uma virou
+    # 1 MB de dado traduzido como código (um cl.exe com 19 GB). A maior função de verdade dos jogos testados tem 34 KB
+    inicios = sorted(inicios_gh | set(ends) | set(subs))
+    fora = []
+    for s in subs:
+        i = bisect.bisect_right(inicios, s)
+        prox = inicios[i] if i < len(inicios) else max(fim_gh, s)
+        if prox - s > 0x10000:
+            fora.append(s)
+    if fora:
+        print('  - %d funções do analisador ignoradas (mais de 64 KB até o próximo início, é dado): %s' % (
+            len(fora), ' '.join('0x%X' % s for s in fora)))
+        subs = [s for s in subs if s not in fora]
     if subs:
         print('  + %d funções só do analisador: %s' % (len(subs), ' '.join('0x%X' % s for s in subs)))
         ends += subs
+    if embutidos:
+        n = len(ends)
+        ends = [e for e in ends if not dentro_embutido(e)]
+        if len(ends) < n:
+            print('  - %d entradas dentro de ELFs embutidos tiradas' % (n - len(ends)))
     if ends:
         m = re.search(r'(?ms)^entry_points\s*=\s*\[', an)
         if not m:
@@ -163,6 +252,22 @@ def main():
     if automod:
         an = re.sub(r'(?m)^\s*\{[^}\n]*\}\s*,?\s*# Potential self-modifying code\s*$\n?', '', an)
         print('  - %d NOPs de "código automodificável" do analisador tirados (eram escritas em dados)' % len(automod))
+    # Otavix (02/11): remendos.txt = "<end hex> <instrução hex>  # comentário" por linha, trocados antes da tradução
+    # (Spawn: a constante 16/9 do modo widescreen vira leitura da palavra 0x7FF00 que o runtime grava = proporção da tela)
+    arq_rem = os.path.join(pasta, 'remendos.txt')
+    if os.path.exists(arq_rem):
+        rem = []
+        for linha in open(arq_rem, encoding='utf-8-sig'):
+            linha = linha.split('#', 1)[0].strip()
+            if linha:
+                e, v = linha.split()[:2]
+                rem.append('  { address = "0x%08X", value = "0x%08X" },\n' % (int(e, 16), int(v, 16)))
+        m = re.search(r'(?ms)^\[patches\]\s*\ninstructions\s*=\s*\[\s*\n?', an)
+        if m:
+            an = an[:m.end()] + ''.join(rem) + an[m.end():]
+        else:
+            an = an.rstrip('\n') + '\n\n[patches]\ninstructions = [\n' + ''.join(rem) + ']\n'
+        print('  + %d remendos de instrução' % len(rem))
     tomllib.loads(an)   # confere que continua TOML válido
     open(os.path.join(pasta, 'config.toml'), 'w', encoding='utf-8', newline='\n').write(an)
     print('%s: %d stubs (analisador %d, ghidra %d)' % (os.path.basename(pasta), len(stubs), len(s_an), len(s_gh)))

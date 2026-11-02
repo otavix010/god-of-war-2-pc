@@ -179,7 +179,16 @@ Etapa '2_disco' {
     }
     Msg 'extraindo os arquivos do disco para trabalho\disc'
     Exec $LOG "python -I `"$R\ferramentas\extrai_iso.py`" `"$Iso`" `"$T\disc`""
-    if (-not (Test-Path -LiteralPath $ELF)) { throw "o executável $($JOGO.elf) não está nessa ISO: é a versão $($JOGO.versao)?" }
+    if (-not (Test-Path -LiteralPath $ELF)) {
+        # diz de que jogo a ISO é (o SYSTEM.CNF aponta o executável, cujo nome é o serial): ISO do jogo errado é o caso comum
+        $cnf = Join-Path $T 'disc\SYSTEM.CNF'
+        $qual = ''
+        if ((Test-Path -LiteralPath $cnf) -and ((Get-Content -Raw -LiteralPath $cnf) -match 'BOOT2\s*=\s*cdrom0?:\\?([^;\r\n]+)')) {
+            $serial = [IO.Path]::GetFileName($Matches[1].Trim()) -replace '_', '-' -replace '\.', ''
+            $qual = " Essa ISO é de outro jogo ou versão (serial $serial)."
+        }
+        throw "o executável $($JOGO.elf) não está nessa ISO.$qual Escolha a ISO do $($JOGO.nome), versão $($JOGO.versao)."
+    }
     $he = Sha1 $ELF
     if ($JOGO.elf_sha1 -notcontains $he) {
         throw "o executável do jogo não é o da versão suportada ($($JOGO.versao), $($JOGO.serial)). SHA-1 dele: $he"
@@ -216,7 +225,7 @@ $RECOMP = Get-ChildItem (Join-Path $P 'out\ferramentas') -Recurse -Filter 'ps2_r
 # ---------------------------------------------------------------------------- tradução
 Etapa '4_traduzir' {
     if (-not $RECOMP) { throw 'o ps2_recomp.exe não foi compilado (rode -RefazerDe 3)' }
-    foreach ($a in 'analisador.toml', 'ghidra_config.toml', 'ghidra_funcoes.csv', 'entradas_extra.txt', 'stubs_extra.txt', 'stubs_tirar.txt') {
+    foreach ($a in 'analisador.toml', 'ghidra_config.toml', 'ghidra_funcoes.csv', 'entradas_extra.txt', 'stubs_extra.txt', 'stubs_tirar.txt', 'remendos.txt') {
         $o = Join-Path $R "jogo\$a"
         if (Test-Path -LiteralPath $o) { Copy-Item -LiteralPath $o $T -Force }
     }
@@ -275,7 +284,7 @@ Etapa '6_compilar' {
     # sem ele, com o próprio MSVC
     $lancador = (Join-Path $R 'ferramentas\otx_lanca.py').Replace('\', '/')
     Msg "compilando o jogo ($Jobs compilações em paralelo$(if ($avx2) { ', AVX2' }); de 20 min a 1 h)"
-    $cfg = "-DCMAKE_BUILD_TYPE=RelWithDebInfo `"-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/O2 /Ob2 /Oi /DNDEBUG $arch/GS-`" `"-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /DNDEBUG`" " +
+    $cfg = "-DCMAKE_BUILD_TYPE=RelWithDebInfo `"-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/O2 /Ob2 /Oi /DNDEBUG $arch/GS- /bigobj`" `"-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /DNDEBUG`" " +
            "`"-DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO=/INCREMENTAL:NO`" -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_IOP_RPC_TRACE=OFF " +
            "-DPS2X_SHOW_WINDOWS_CONSOLE=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_BUILD_ANALYZER=OFF " +
            "`"-DPS2X_VU1_LANCADOR=$lancador`""

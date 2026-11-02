@@ -5144,6 +5144,84 @@ index c784ff7..f6112d8 100644
  	void WriteP4HH(u8* data, u32 bp, u32 bw, u32 x, u32 y, u32 value);
  	void WriteP4HL(u8* data, u32 bp, u32 bw, u32 x, u32 y, u32 value);
  
+diff --git a/ps2xRuntime/include/runtime/otx_aspecto.h b/ps2xRuntime/include/runtime/otx_aspecto.h
+new file mode 100644
+index 0000000..1344b17
+--- /dev/null
++++ b/ps2xRuntime/include/runtime/otx_aspecto.h
+@@ -0,0 +1,72 @@
++// Otavix (02/11): proporção da tela (PS2X_ASPECTO) compartilhada entre a apresentação e o vblank do EE.
++// A apresentação calcula a proporção usada (21:9 encaixa na do monitor) e o vblank grava no jogo:
++// - PS2X_ASPECTO_ENDS=<end hex>[,...]: floats de proporção do próprio jogo (GoW: os 3 globais que o
++//   modo WideScreen escolhe entre 4/3 e 16/9), gravados a cada vblank só quando a tela é mais larga que 4:3;
++// - kOtxAspectoLargoEnd: palavra do kernel que os remendos de instrução leem no lugar da constante 16/9
++//   do jogo (lui/ori -> lui/lw, ver jogo\remendos.txt do repo); vale a proporção larga atual ou 16/9;
++// - PS2X_ASPECTO_LIGA=<end hex>=<valor>[,...]: liga o modo widescreen do jogo quando a tela é larga.
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++
++namespace otx_aspecto
++{
++    constexpr uint32_t kOtxAspectoLargoEnd = 0x0007FF00u;
++
++    // proporção em uso (0 = nativo, pixels quadrados); bits do float
++    inline std::atomic<uint32_t> g_bits{0u};
++
++    inline float atual()
++    {
++        const uint32_t b = g_bits.load(std::memory_order_relaxed);
++        float f;
++        std::memcpy(&f, &b, sizeof f);
++        return f;
++    }
++
++    inline void define(float f)
++    {
++        uint32_t b;
++        std::memcpy(&b, &f, sizeof b);
++        g_bits.store(b, std::memory_order_relaxed);
++    }
++
++    // PS2X_ASPECTO: 4:3 (padrão) | 16:9 | 21:9 | 32:9 | <L>:<A> qualquer | tela (a do monitor/janela) | nativo.
++    // Pedido a menos de 4% da proporção da tela encaixa nela (21:9 = 2,33 a 2,40 conforme o monitor).
++    inline float pedido(float telaL, float telaA)
++    {
++        static const std::string s = []
++        {
++            const char *e = std::getenv("PS2X_ASPECTO");
++            return std::string(e ? e : "4:3");
++        }();
++        const float tela = telaA > 0.0f ? telaL / telaA : 4.0f / 3.0f;
++        if (s == "nativo")
++            return 0.0f;
++        if (s == "tela")
++            return tela;
++        float a = 4.0f / 3.0f;
++        const size_t p = s.find(':');
++        if (p != std::string::npos)
++        {
++            const float l = std::strtof(s.substr(0, p).c_str(), nullptr);
++            const float h = std::strtof(s.substr(p + 1).c_str(), nullptr);
++            if (l > 0.0f && h > 0.0f)
++                a = l / h;
++        }
++        if (s == "21:9")
++            a = 64.0f / 27.0f; // 2560x1080; 3440x1440 (2,39) encaixa abaixo
++        if (a > 4.0f / 3.0f + 0.01f && tela > 0.0f && a / tela > 0.96f && a / tela < 1.04f)
++            a = tela;
++        return a;
++    }
++
++    inline bool largo()
++    {
++        return atual() > 4.0f / 3.0f + 0.01f;
++    }
++}
 diff --git a/ps2xRuntime/include/runtime/otx_guarda.h b/ps2xRuntime/include/runtime/otx_guarda.h
 new file mode 100644
 index 0000000..3bc6eb2
@@ -5360,12 +5438,13 @@ index 67c8184..457a67c 100644
      uint64_t calculatePairReadyCycle(const DecodedInstructionPair &decoded) const;
      void markPairWrites(const DecodedInstructionPair &decoded);
 diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
-index c5e31c4..ea30b02 100644
+index c5e31c4..8f392bd 100644
 --- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
-@@ -1,13 +1,138 @@
+@@ -1,13 +1,139 @@
 +#include <thread>
 +#include "runtime/otx_perfil.h"
++#include "runtime/otx_aspecto.h"
  #include "runtime/ee_scheduler.h"
 +extern thread_local bool g_otxPreempcao; // Otavix (patch_preempcao)
  
@@ -5502,7 +5581,7 @@ index c5e31c4..ea30b02 100644
  
  namespace
  {
-@@ -31,7 +156,19 @@ namespace
+@@ -31,7 +157,19 @@ namespace
      constexpr uint32_t WEF_OR = 0x01u;
      constexpr uint32_t WEF_CLEAR = 0x10u;
      constexpr uint32_t WEF_CLEAR_ALL = 0x20u;
@@ -5523,7 +5602,7 @@ index c5e31c4..ea30b02 100644
      constexpr auto kVBlankDuration = std::chrono::microseconds(500);
      constexpr uint64_t kAlarmTickMicroseconds = 64u;
      constexpr uint32_t kDebugPublishDispatchInterval = 4096u;
-@@ -50,7 +187,7 @@ namespace
+@@ -50,7 +188,7 @@ namespace
          return std::chrono::seconds(wholeSeconds) + std::chrono::nanoseconds(remainingNanoseconds);
      }
  
@@ -5532,7 +5611,7 @@ index c5e31c4..ea30b02 100644
      constexpr uint64_t kVBlankDurationCycles = microsecondsToEeCycles(500u);
      constexpr uint64_t kAlarmTickCycles = microsecondsToEeCycles(kAlarmTickMicroseconds);
  
-@@ -152,6 +289,46 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
+@@ -152,6 +290,46 @@ void EeScheduler::reset(uint8_t *rdram, const R5900Context &mainContext)
      publishSnapshot();
  }
  
@@ -5579,7 +5658,7 @@ index c5e31c4..ea30b02 100644
  void EeScheduler::run()
  {
      assertExecutor();
-@@ -185,6 +362,7 @@ void EeScheduler::run()
+@@ -185,6 +363,7 @@ void EeScheduler::run()
                  GuestThread *owner = &acquireInvocationThread();
                  GuestInvocation invocation = std::move(m_pendingInvocations.front());
                  m_pendingInvocations.pop_front();
@@ -5587,7 +5666,7 @@ index c5e31c4..ea30b02 100644
                  owner->status = EeThreadStatus::Running;
                  m_currentThreadId = owner->id;
                  renewTimeSlice();
-@@ -215,6 +393,9 @@ void EeScheduler::run()
+@@ -215,6 +394,9 @@ void EeScheduler::run()
              }
          }
          R5900Context &context = running->activeContext();
@@ -5597,7 +5676,7 @@ index c5e31c4..ea30b02 100644
          if (m_debugPublishCountdown == 0u)
          {
              copyMainContextToRuntime();
-@@ -234,6 +415,21 @@ void EeScheduler::run()
+@@ -234,6 +416,21 @@ void EeScheduler::run()
              {
                  GuestInvocation completed = std::move(running->invocations.back());
                  running->invocations.pop_back();
@@ -5619,7 +5698,7 @@ index c5e31c4..ea30b02 100644
                  if (completed.onComplete)
                  {
                      try
-@@ -246,6 +442,34 @@ void EeScheduler::run()
+@@ -246,6 +443,34 @@ void EeScheduler::run()
                  }
                  continue;
              }
@@ -5654,7 +5733,7 @@ index c5e31c4..ea30b02 100644
              makeDormant(*running);
              m_currentThreadId = 0;
              copyMainContextToRuntime();
-@@ -254,10 +478,88 @@ void EeScheduler::run()
+@@ -254,10 +479,88 @@ void EeScheduler::run()
              continue;
          }
  
@@ -5744,7 +5823,7 @@ index c5e31c4..ea30b02 100644
              if (getRegU32(&invocation.context, 29) == 0u)
              {
                  SET_GPR_U32(&invocation.context, 29, invocationStackTop());
-@@ -287,15 +589,41 @@ void EeScheduler::run()
+@@ -287,15 +590,41 @@ void EeScheduler::run()
          }
          PS2Runtime::RecompiledFunction function = m_runtime.lookupFunction(context.pc);
  
@@ -5787,7 +5866,7 @@ index c5e31c4..ea30b02 100644
              function(m_rdram, &context, &m_runtime);
              m_guestExecuting.store(false, std::memory_order_release);
              m_insideInterrupt = false;
-@@ -314,7 +642,7 @@ void EeScheduler::run()
+@@ -314,7 +643,7 @@ void EeScheduler::run()
          }
  
          processPendingEvents();
@@ -5796,7 +5875,7 @@ index c5e31c4..ea30b02 100644
          {
              GuestThread *preempted = currentThread();
              assert(preempted != nullptr);
-@@ -338,6 +666,16 @@ void EeScheduler::requestStop()
+@@ -338,6 +667,16 @@ void EeScheduler::requestStop()
      m_eventCv.notify_all();
  }
  
@@ -5813,7 +5892,7 @@ index c5e31c4..ea30b02 100644
  void EeScheduler::postEvent(EeEvent event)
  {
      if (event.type == EeEventType::Stop)
-@@ -354,9 +692,51 @@ void EeScheduler::postEvent(EeEvent event)
+@@ -354,9 +693,51 @@ void EeScheduler::postEvent(EeEvent event)
      m_eventCv.notify_one();
  }
  
@@ -5822,8 +5901,7 @@ index c5e31c4..ea30b02 100644
 +static std::atomic<int64_t> g_otxProxPrazoHost{0};
 +static std::atomic<uint64_t> g_otxVbCiclo{0};
 +static bool otxRelogioReal()
- {
--    accountCycles(cycles);
++{
 +    static const bool ligado = []
 +    {
 +        const char *e = std::getenv("PS2X_RELOGIO_REAL");
@@ -5833,7 +5911,8 @@ index c5e31c4..ea30b02 100644
 +}
 +
 +bool EeScheduler::checkpointDueLento() noexcept
-+{
+ {
+-    accountCycles(cycles);
 +    static const uint32_t otxLote = [] {
 +        const char *e = std::getenv("PS2X_CHECK_LOTE");
 +        const unsigned long v = e ? std::strtoul(e, nullptr, 0) : 256ul;
@@ -5867,7 +5946,7 @@ index c5e31c4..ea30b02 100644
  
      if (m_checkpointPending.load(std::memory_order_acquire) ||
          m_stopRequested.load(std::memory_order_acquire))
-@@ -376,8 +756,14 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+@@ -376,8 +757,14 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
          return false;
      }
  
@@ -5883,7 +5962,7 @@ index c5e31c4..ea30b02 100644
      {
          m_rescheduleRequested = true;
          m_timeSliceExpired = true;
-@@ -390,10 +776,41 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
+@@ -390,10 +777,41 @@ bool EeScheduler::checkpointDue(uint32_t cycles) noexcept
  
  void EeScheduler::accountCycles(uint32_t cycles) noexcept
  {
@@ -5928,7 +6007,7 @@ index c5e31c4..ea30b02 100644
      if (m_pendingEeTimerInterrupts != 0u)
      {
          m_checkpointPending.store(true, std::memory_order_release);
-@@ -420,10 +837,41 @@ void EeScheduler::setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_
+@@ -420,10 +838,41 @@ void EeScheduler::setupCurrentThread(uint32_t stack, uint32_t stackSize, uint32_
      publishSnapshot();
  }
  
@@ -5971,7 +6050,7 @@ index c5e31c4..ea30b02 100644
      {
          return KE_ILLEGAL_PRIORITY;
      }
-@@ -701,7 +1149,7 @@ int EeScheduler::cancelWakeup(int id)
+@@ -701,7 +1150,7 @@ int EeScheduler::cancelWakeup(int id)
  int EeScheduler::changePriority(int id, int priority, bool interruptSafe, int &oldPriority)
  {
      assertExecutor();
@@ -5980,7 +6059,7 @@ index c5e31c4..ea30b02 100644
      {
          return KE_ILLEGAL_PRIORITY;
      }
-@@ -801,7 +1249,8 @@ int EeScheduler::releaseWait(int id, bool interruptSafe)
+@@ -801,7 +1250,8 @@ int EeScheduler::releaseWait(int id, bool interruptSafe)
  void EeScheduler::transferIfRequested(bool interruptSafe)
  {
      assertExecutor();
@@ -5990,7 +6069,7 @@ index c5e31c4..ea30b02 100644
      {
          return;
      }
-@@ -1106,6 +1555,43 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
+@@ -1106,6 +1556,43 @@ void EeScheduler::queueInvocation(GuestInvocation invocation)
      m_checkpointPending.store(true, std::memory_order_release);
  }
  
@@ -6034,7 +6113,7 @@ index c5e31c4..ea30b02 100644
  [[noreturn]] void EeScheduler::invokeCurrent(GuestInvocation invocation)
  {
      assertExecutor();
-@@ -1189,6 +1675,9 @@ int EeScheduler::addIrqHandler(bool dmac,
+@@ -1189,6 +1676,9 @@ int EeScheduler::addIrqHandler(bool dmac,
                                 uint32_t sp)
  {
      assertExecutor();
@@ -6044,7 +6123,7 @@ index c5e31c4..ea30b02 100644
      auto &handlers = dmac ? m_dmacHandlers : m_intcHandlers;
      int &nextId = dmac ? m_nextDmacHandlerId : m_nextIntcHandlerId;
      const int id = allocatePositiveId(nextId, handlers);
-@@ -1256,6 +1745,40 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
+@@ -1256,6 +1746,40 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
  {
      assertExecutor();
      const uint32_t mask = dmac ? m_enabledDmacMask : m_enabledIntcMask;
@@ -6085,7 +6164,7 @@ index c5e31c4..ea30b02 100644
      if (cause < 32u && (mask & (1u << cause)) == 0u)
      {
          return;
-@@ -1277,6 +1800,8 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
+@@ -1277,6 +1801,8 @@ void EeScheduler::dispatchIrq(bool dmac, uint32_t cause)
      {
          GuestInvocation invocation{};
          invocation.kind = GuestInvocationKind::Interrupt;
@@ -6094,7 +6173,7 @@ index c5e31c4..ea30b02 100644
          invocation.context.pc = handler.handler;
          SET_GPR_U32(&invocation.context, 4, cause);
          SET_GPR_U32(&invocation.context, 5, handler.argument);
-@@ -1684,6 +2209,8 @@ void EeScheduler::blockCurrent(EeWaitState wait)
+@@ -1684,6 +2210,8 @@ void EeScheduler::blockCurrent(EeWaitState wait)
  {
      GuestThread *self = currentThread();
      assert(self != nullptr);
@@ -6103,7 +6182,7 @@ index c5e31c4..ea30b02 100644
      self->wait = std::move(wait);
      self->status = self->suspendCount == 0 ? EeThreadStatus::Waiting : EeThreadStatus::WaitingSuspended;
      m_currentThreadId = 0;
-@@ -1734,6 +2261,8 @@ void EeScheduler::applyPendingPreemption()
+@@ -1734,6 +2262,8 @@ void EeScheduler::applyPendingPreemption()
      }
      GuestThread *self = currentThread();
      assert(self != nullptr);
@@ -6112,7 +6191,7 @@ index c5e31c4..ea30b02 100644
      enqueueReady(*self, !m_timeSliceExpired);
      m_currentThreadId = 0;
      m_rescheduleRequested = false;
-@@ -1746,6 +2275,7 @@ void EeScheduler::processPendingEvents()
+@@ -1746,6 +2276,7 @@ void EeScheduler::processPendingEvents()
      processDueDeadlines();
      const uint32_t timerInterrupts = m_pendingEeTimerInterrupts;
      m_pendingEeTimerInterrupts = 0u;
@@ -6120,7 +6199,7 @@ index c5e31c4..ea30b02 100644
      for (uint32_t timer = 0u; timer < 4u; ++timer)
      {
          if ((timerInterrupts & (1u << timer)) != 0u)
-@@ -1800,10 +2330,76 @@ void EeScheduler::processDueDeadlines()
+@@ -1800,10 +2331,76 @@ void EeScheduler::processDueDeadlines()
  
              if (now < pacingDeadline)
              {
@@ -6201,7 +6280,7 @@ index c5e31c4..ea30b02 100644
                  {
                      updateNextDeadline();
                      return;
-@@ -1847,6 +2443,8 @@ void EeScheduler::processDueDeadlines()
+@@ -1847,6 +2444,8 @@ void EeScheduler::processDueDeadlines()
          {
              if (scheduled.event.type == EeEventType::VBlankStart)
              {
@@ -6210,7 +6289,7 @@ index c5e31c4..ea30b02 100644
                  scheduleEvent(scheduled.deadlineCycle + kVBlankDurationCycles,
                                scheduled.hostDeadline + kVBlankDuration,
                                EeEvent{EeEventType::VBlankEnd, 0, m_vsyncTick + 1u});
-@@ -1868,6 +2466,7 @@ void EeScheduler::processEvent(const EeEvent &event)
+@@ -1868,6 +2467,7 @@ void EeScheduler::processEvent(const EeEvent &event)
          break;
      case EeEventType::VBlankStart:
          ++m_vsyncTick;
@@ -6218,7 +6297,7 @@ index c5e31c4..ea30b02 100644
          m_runtime.memory().gs().vsyncTick.store(m_vsyncTick, std::memory_order_release);
          if ((m_vsyncTick & 1u) != 0u)
          {
-@@ -1878,6 +2477,73 @@ void EeScheduler::processEvent(const EeEvent &event)
+@@ -1878,6 +2478,125 @@ void EeScheduler::processEvent(const EeEvent &event)
              m_runtime.memory().gs().csr.fetch_and(~0x2000ull, std::memory_order_acq_rel);
          }
          writeGuestU32(m_vsyncFlagAddress, 1u);
@@ -6258,6 +6337,58 @@ index c5e31c4..ea30b02 100644
 +            }();
 +            for (const Remendo &r : pokes)
 +                writeGuestU32(r.end, r.val);
++            // Otavix (02/11): proporção da tela no jogo (16:9 / 21:9...), ver otx_aspecto.h
++            {
++                static const std::vector<uint32_t> endsAspecto = []
++                {
++                    std::vector<uint32_t> v;
++                    if (const char *e = std::getenv("PS2X_ASPECTO_ENDS"))
++                    {
++                        const std::string s(e);
++                        for (size_t i = 0; i < s.size();)
++                        {
++                            size_t f = s.find(',', i);
++                            if (f == std::string::npos)
++                                f = s.size();
++                            v.push_back(static_cast<uint32_t>(std::strtoul(s.substr(i, f - i).c_str(), nullptr, 16)));
++                            i = f + 1;
++                        }
++                    }
++                    return v;
++                }();
++                // PS2X_ASPECTO_LIGA=<end hex>=<valor>[,...]: liga o modo widescreen do próprio jogo (Spawn 338784=1)
++                static const std::vector<Remendo> liga = []
++                {
++                    std::vector<Remendo> v;
++                    if (const char *e = std::getenv("PS2X_ASPECTO_LIGA"))
++                    {
++                        const std::string s(e);
++                        for (size_t i = 0; i < s.size();)
++                        {
++                            size_t f = s.find(',', i);
++                            if (f == std::string::npos)
++                                f = s.size();
++                            const std::string t = s.substr(i, f - i);
++                            const size_t eq = t.find('=');
++                            if (eq != std::string::npos)
++                                v.push_back({static_cast<uint32_t>(std::strtoul(t.substr(0, eq).c_str(), nullptr, 16)),
++                                             static_cast<uint32_t>(std::strtoul(t.substr(eq + 1).c_str(), nullptr, 0))});
++                            i = f + 1;
++                        }
++                    }
++                    return v;
++                }();
++                const bool largo = otx_aspecto::largo();
++                const uint32_t bits = otx_aspecto::g_bits.load(std::memory_order_relaxed);
++                writeGuestU32(otx_aspecto::kOtxAspectoLargoEnd, largo ? bits : 0x3FE38E39u /* 16/9 */);
++                if (largo)
++                {
++                    for (uint32_t a : endsAspecto)
++                        writeGuestU32(a, bits);
++                    for (const Remendo &r : liga)
++                        writeGuestU32(r.end, r.val);
++                }
++            }
 +            static const std::vector<uint32_t> peeks = []
 +            {
 +                std::vector<uint32_t> v;
@@ -6292,7 +6423,7 @@ index c5e31c4..ea30b02 100644
          if (m_vsyncTickAddress != 0u)
          {
              const uint32_t physical = m_vsyncTickAddress & 0x1FFFFFFFu;
-@@ -1900,6 +2566,39 @@ void EeScheduler::processEvent(const EeEvent &event)
+@@ -1900,6 +2619,39 @@ void EeScheduler::processEvent(const EeEvent &event)
              SET_GPR_U32(&invocation.context, 31, 0u);
              queueInvocation(std::move(invocation));
          }
@@ -6332,7 +6463,7 @@ index c5e31c4..ea30b02 100644
          dispatchIrq(false, 2u);
          break;
      case EeEventType::ExternalWake:
-@@ -1997,7 +2696,8 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
+@@ -1997,7 +2749,8 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
  void EeScheduler::waitForEvent()
  {
      std::unique_lock lock(m_eventMutex);
@@ -6342,7 +6473,7 @@ index c5e31c4..ea30b02 100644
      {
          return;
      }
-@@ -2006,7 +2706,9 @@ void EeScheduler::waitForEvent()
+@@ -2006,7 +2759,9 @@ void EeScheduler::waitForEvent()
      if (m_deadlines.empty() && !hasTimerDeadline)
      {
          m_eventCv.wait(lock, [this]()
@@ -6353,7 +6484,7 @@ index c5e31c4..ea30b02 100644
          return;
      }
  
-@@ -2036,9 +2738,56 @@ void EeScheduler::waitForEvent()
+@@ -2036,9 +2791,56 @@ void EeScheduler::waitForEvent()
          }
      }
  
@@ -6413,7 +6544,7 @@ index c5e31c4..ea30b02 100644
      if (!signaled)
      {
          const uint64_t elapsed = deadlineCycle > m_eeCycle ? deadlineCycle - m_eeCycle : 0u;
-@@ -2071,6 +2820,8 @@ void EeScheduler::updateNextDeadline()
+@@ -2071,6 +2873,8 @@ void EeScheduler::updateNextDeadline()
      if (m_deadlines.empty())
      {
          m_nextDeadlineCycle.store(0u, std::memory_order_release);
@@ -6422,7 +6553,7 @@ index c5e31c4..ea30b02 100644
          return;
      }
      const auto it = std::min_element(m_deadlines.begin(), m_deadlines.end(),
-@@ -2083,6 +2834,21 @@ void EeScheduler::updateNextDeadline()
+@@ -2083,6 +2887,21 @@ void EeScheduler::updateNextDeadline()
                                           return left.sequence < right.sequence;
                                       });
      m_nextDeadlineCycle.store(it->deadlineCycle, std::memory_order_release);
@@ -9759,7 +9890,7 @@ index 0000000..bea6414
 +void otxGuardaFim(uint8_t *, uint32_t) {}
 +#endif
 diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
-index f0ad507..5400654 100644
+index f0ad507..118f202 100644
 --- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
 @@ -1,4 +1,9 @@
@@ -10589,7 +10720,33 @@ index f0ad507..5400654 100644
  }
  
  void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
-@@ -1236,6 +1746,8 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+@@ -1175,9 +1685,12 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+     int y1 = static_cast<int>(v1.y) - ofy;
+     u32 z1 = static_cast<u32>(v1.z);
+ 
+-    if (x0 > x1)
++    // Otavix (02/11): o U/V acompanha o canto (no GS o vértice troca inteiro); antes um sprite desenhado de baixo para
++    // cima saía espelhado
++    const bool trocaX = x0 > x1, trocaY = y0 > y1;
++    if (trocaX)
+         std::swap(x0, x1);
+-    if (y0 > y1)
++    if (trocaY)
+         std::swap(y0, y1);
+ 
+     const int unclippedX0 = x0;
+@@ -1226,6 +1739,10 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+             u1f = (v1.s / q1) * static_cast<float>(texW);
+             v1f = (v1.t / q1) * static_cast<float>(texH);
+         }
++        if (trocaX)
++            std::swap(u0f, u1f);
++        if (trocaY)
++            std::swap(v0f, v1f);
+ 
+         float spriteW = static_cast<float>(spanX);
+         float spriteH = static_cast<float>(spanY);
+@@ -1236,6 +1753,8 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
  
          for (int y = drawY0; y <= drawY1; ++y)
          {
@@ -10598,7 +10755,7 @@ index f0ad507..5400654 100644
              float ty = (static_cast<float>(y - unclippedY0) + 0.5f) / spriteH;
              float texVf = v0f + (v1f - v0f) * ty;
  
-@@ -1270,151 +1782,2201 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+@@ -1270,151 +1789,2201 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
      else
      {
          for (int y = drawY0; y <= drawY1; ++y)
@@ -12912,7 +13069,7 @@ index f0ad507..5400654 100644
      if (totalSteps == 0)
          totalSteps = 1;
      int step = 0;
-@@ -1460,9 +4022,47 @@ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)
+@@ -1460,9 +4029,47 @@ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)
      }
  }
  
@@ -12960,7 +13117,7 @@ index f0ad507..5400654 100644
      m_transfer = command;
      m_transferState.x = command.trxpos.dsax;
      m_transferState.y = command.trxpos.dsay;
-@@ -1471,6 +4071,18 @@ void GSCpuBackend::BeginTransfer(const GSTransferCommand &command)
+@@ -1471,6 +4078,18 @@ void GSCpuBackend::BeginTransfer(const GSTransferCommand &command)
      m_transferState.direction = command.direction;
      m_transferState.localToHostPendingBytes = 0u;
  
@@ -12979,7 +13136,7 @@ index f0ad507..5400654 100644
      if (command.direction == 2u)
          PerformLocalToLocalTransfer();
      else if (command.direction == 1u)
-@@ -1482,34 +4094,207 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1482,34 +4101,207 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
      std::lock_guard<std::mutex> lock(m_mutex);
      if (!data || sizeBytes == 0u || !m_vram || m_transferState.direction != 0u)
          return;
@@ -13201,7 +13358,7 @@ index f0ad507..5400654 100644
      {
          switch (dpsm)
          {
-@@ -1520,7 +4305,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1520,7 +4312,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
                  return;
              uint32_t value = 0u;
              std::memcpy(&value, data + offset, sizeof(value));
@@ -13210,7 +13367,7 @@ index f0ad507..5400654 100644
              offset += 4u;
              advancePixel(1u);
              break;
-@@ -1533,7 +4318,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1533,7 +4325,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
              const uint32_t value = static_cast<uint32_t>(data[offset]) |
                                     (static_cast<uint32_t>(data[offset + 1u]) << 8u) |
                                     (static_cast<uint32_t>(data[offset + 2u]) << 16u);
@@ -13219,7 +13376,7 @@ index f0ad507..5400654 100644
              offset += 3u;
              advancePixel(1u);
              break;
-@@ -1547,35 +4332,117 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1547,35 +4339,117 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
                  return;
              uint16_t value = 0u;
              std::memcpy(&value, data + offset, sizeof(value));
@@ -13354,7 +13511,7 @@ index f0ad507..5400654 100644
              break;
          }
          default:
-@@ -1586,6 +4453,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1586,6 +4460,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
  
  void GSCpuBackend::PerformLocalToLocalTransfer()
  {
@@ -13362,7 +13519,7 @@ index f0ad507..5400654 100644
      if (!m_vram)
          return;
  
-@@ -1697,6 +4565,7 @@ void GSCpuBackend::PerformLocalToHostTransfer()
+@@ -1697,6 +4572,7 @@ void GSCpuBackend::PerformLocalToHostTransfer()
  uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -13370,7 +13527,7 @@ index f0ad507..5400654 100644
      if (!dst || maxBytes == 0u || m_localToHostReadPos >= m_localToHostBuffer.size())
          return 0u;
      const size_t count = std::min<size_t>(maxBytes, m_localToHostBuffer.size() - m_localToHostReadPos);
-@@ -1709,6 +4578,7 @@ uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
+@@ -1709,6 +4585,7 @@ uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -13378,7 +13535,7 @@ index f0ad507..5400654 100644
      if (!m_vram || context.frame.fbw == 0u)
          return false;
  
-@@ -1725,6 +4595,13 @@ bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
+@@ -1725,6 +4602,13 @@ bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
  
      const uint32_t fbp = GSInternal::framePageBaseToBlock(context.frame.fbp);
      const uint32_t fbw = std::max<uint32_t>(context.frame.fbw, 1u);
@@ -13715,10 +13872,10 @@ index 9281d5f..4eac029 100644
      int x1 = static_cast<int>(v1.x) - (ctx.xyoffset.ofx >> 4);
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu.cpp b/ps2xRuntime/src/lib/gs/gs_gpu.cpp
 new file mode 100644
-index 0000000..761e4b0
+index 0000000..aaa8fe1
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu.cpp
-@@ -0,0 +1,3302 @@
+@@ -0,0 +1,3310 @@
 +// Otavix (gs_gpu): ver include/runtime/gs/gs_gpu.h
 +#include "runtime/gs/gs_gpu.h"
 +#include "runtime/gs/ps2_gs_memory.h"
@@ -14601,8 +14758,11 @@ index 0000000..761e4b0
 +        {
 +            int x0 = static_cast<int>(v0.x) - ofx, y0 = static_cast<int>(v0.y) - ofy;
 +            int x1 = static_cast<int>(v1.x) - ofx, y1 = static_cast<int>(v1.y) - ofy;
-+            if (x0 > x1) std::swap(x0, x1);
-+            if (y0 > y1) std::swap(y0, y1);
++            // Otavix (02/11): o U/V acompanha o canto (no GS o vértice troca inteiro); antes só o X/Y trocava e um sprite
++            // desenhado de baixo para cima (10.000 Bullets desvira a cena assim) saía de cabeça para baixo
++            const bool trocaX = x0 > x1, trocaY = y0 > y1;
++            if (trocaX) std::swap(x0, x1);
++            if (trocaY) std::swap(y0, y1);
 +            const int spanX = std::max(1, x1 - x0), spanY = std::max(1, y1 - y0);
 +            const int ux1 = x0 + spanX - 1, uy1 = y0 + spanY - 1;
 +            if (ux1 < ctx.scissor.x0 || x0 > ctx.scissor.x1 || uy1 < ctx.scissor.y0 || y0 > ctx.scissor.y1)
@@ -14636,6 +14796,8 @@ index 0000000..761e4b0
 +                    p.u1f = (v1.s / q1) * static_cast<float>(state.textureWidth);
 +                    p.v1f = (v1.t / q1) * static_cast<float>(state.textureHeight);
 +                }
++                if (trocaX) std::swap(p.u0f, p.u1f);
++                if (trocaY) std::swap(p.v0f, p.v1f);
 +            }
 +        }
 +        else
@@ -16240,7 +16402,10 @@ index 0000000..761e4b0
 +                    {
 +                        int p0 = static_cast<int>(pa), p1 = static_cast<int>(pb);
 +                        if (p0 > p1)
++                        {
 +                            std::swap(p0, p1);
++                            std::swap(ta, tb); // o U/V vai com o canto (montaGeo)
++                        }
 +                        const double sp = std::max(1, p1 - p0);
 +                        const double c0 = static_cast<double>(ta >> 4), c1 = static_cast<double>(tb >> 4);
 +                        lo = 1 << 30; hi = -(1 << 30);
@@ -20448,19 +20613,20 @@ index a72105b..4a2e5dc 100644
      std::vector<PS2RomProfile> profiles;
      {
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 45cb9d2..dc1bd32 100644
+index 45cb9d2..71f7b61 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,9 @@
 +#include <intrin.h>
  #include "ps2_runtime.h"
 +#include "runtime/otx_perfil.h"
 +#include "runtime/otx_imagem.h"
++#include "runtime/otx_aspecto.h"
 +extern thread_local bool g_otxPreempcao; // Otavix (patch_preempcao)
  #include "ps2_log.h"
  #include "ps2_stubs.h"
  #include "ps2_syscalls.h"
-@@ -13,6 +17,7 @@
+@@ -13,6 +18,7 @@
  #include "ps2_host_backend.h"
  #include "ps2_iop_host.h"
  #include "ps2x/iop/iop_subsystem.h"
@@ -20468,7 +20634,7 @@ index 45cb9d2..dc1bd32 100644
  
  #include <iostream>
  #include <stdexcept>
-@@ -20,13 +25,149 @@
+@@ -20,13 +26,149 @@
  #include <algorithm>
  #include <array>
  #include <cstring>
@@ -20618,7 +20784,7 @@ index 45cb9d2..dc1bd32 100644
  namespace ps2_stubs
  {
      void resetSifState();
-@@ -90,7 +231,11 @@ namespace
+@@ -90,7 +232,11 @@ namespace
      constexpr uint32_t kGuestHeapDefaultBase = 0x00100000u;
      constexpr uint32_t kGuestHeapDefaultAlignment = 16u;
      constexpr uint32_t kGuestHeapSafetyPad = 0x1000u;
@@ -20631,7 +20797,7 @@ index 45cb9d2..dc1bd32 100644
  
      constexpr uint32_t COP0_CAUSE_EXCCODE_MASK = 0x0000007Cu;
      constexpr uint32_t COP0_CAUSE_BD = 0x80000000u;
-@@ -375,6 +520,8 @@ namespace
+@@ -375,6 +521,8 @@ namespace
  
  static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint32_t &outHeight)
  {
@@ -20640,7 +20806,7 @@ index 45cb9d2..dc1bd32 100644
      static uint64_t s_lastPresentationTick = std::numeric_limits<uint64_t>::max();
      static bool s_hasLatchedInitialFrame = false;
      static uint32_t s_lastDisplayFbp = std::numeric_limits<uint32_t>::max();
-@@ -477,12 +624,92 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+@@ -477,12 +625,92 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
      s_hasUploadedFrame = true;
  }
  
@@ -20733,7 +20899,7 @@ index 45cb9d2..dc1bd32 100644
  
      // Assign rather than memset: R5900Context's constructor zeroes itself and
      // then applies the COP0 reset values, which a memset here would discard.
-@@ -503,8 +730,10 @@ PS2Runtime::PS2Runtime()
+@@ -503,8 +731,10 @@ PS2Runtime::PS2Runtime()
      m_guestHeapLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
      m_guestHeapSuggestedBase = kGuestHeapDefaultBase;
      m_guestHeapConfigured = false;
@@ -20746,7 +20912,7 @@ index 45cb9d2..dc1bd32 100644
  }
  
  void PS2Runtime::setDebugUiCallbacks(DebugUiCallback initCallback,
-@@ -570,6 +799,12 @@ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModule(std::string_view path, con
+@@ -570,6 +800,12 @@ ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModule(std::string_view path, con
      return m_iopSubsystem->loadModule(path, arguments, argumentSize);
  }
  
@@ -20759,7 +20925,7 @@ index 45cb9d2..dc1bd32 100644
  ps2x::iop::ModuleLoadResult PS2Runtime::loadIopModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
  {
      auto scope = m_iopHost->enterCall(nullptr, m_memory.getRDRAM());
-@@ -650,6 +885,10 @@ bool PS2Runtime::isIopMemoryRange(uint32_t address, size_t size) const
+@@ -650,6 +886,10 @@ bool PS2Runtime::isIopMemoryRange(uint32_t address, size_t size) const
      return m_iopSubsystem && m_iopSubsystem->isMemoryRange(address, size);
  }
  
@@ -20770,7 +20936,7 @@ index 45cb9d2..dc1bd32 100644
  bool PS2Runtime::syncCoreSubsystems()
  {
      uint8_t *const rdram = m_memory.getRDRAM();
-@@ -666,8 +905,47 @@ bool PS2Runtime::syncCoreSubsystems()
+@@ -666,8 +906,47 @@ bool PS2Runtime::syncCoreSubsystems()
  
      m_gs.init(gsVram, static_cast<uint32_t>(PS2_GS_VRAM_SIZE), &m_memory.gs());
      m_gifArbiter.setProcessPacketFn([this](const uint8_t *data, uint32_t size)
@@ -20819,7 +20985,7 @@ index 45cb9d2..dc1bd32 100644
      m_memory.setVu1MscalCallback([this](uint32_t startPC, uint32_t top, uint32_t itop)
                                   {
                                       R5900Context *cpuContext = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
-@@ -679,9 +957,12 @@ bool PS2Runtime::syncCoreSubsystems()
+@@ -679,9 +958,12 @@ bool PS2Runtime::syncCoreSubsystems()
                                           (cpuContext->vu0_fbrst & (1u << 10)) != 0u;
                                       m_vu1.state().tBitEnabled =
                                           (cpuContext->vu0_fbrst & (1u << 11)) != 0u;
@@ -20832,7 +20998,7 @@ index 45cb9d2..dc1bd32 100644
                                       cpuContext->vu0_vpu_stat =
                                           (cpuContext->vu0_vpu_stat & ~0x0600u) |
                                           (m_vu1.state().stoppedByD ? 0x0200u : 0u) |
-@@ -697,9 +978,12 @@ bool PS2Runtime::syncCoreSubsystems()
+@@ -697,9 +979,12 @@ bool PS2Runtime::syncCoreSubsystems()
                                           (cpuContext->vu0_fbrst & (1u << 10)) != 0u;
                                       m_vu1.state().tBitEnabled =
                                           (cpuContext->vu0_fbrst & (1u << 11)) != 0u;
@@ -20845,7 +21011,7 @@ index 45cb9d2..dc1bd32 100644
                                       cpuContext->vu0_vpu_stat =
                                           (cpuContext->vu0_vpu_stat & ~0x0600u) |
                                           (m_vu1.state().stoppedByD ? 0x0200u : 0u) |
-@@ -731,12 +1015,39 @@ bool PS2Runtime::initialize(const char *title)
+@@ -731,12 +1016,39 @@ bool PS2Runtime::initialize(const char *title)
  #if defined(PLATFORM_VITA)
          InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title); // raylib vita does not support audio
  #else
@@ -20889,7 +21055,7 @@ index 45cb9d2..dc1bd32 100644
          if (m_debugUiInitCallback)
          {
              m_debugUiInitCallback(*this, m_debugUiUserData);
-@@ -971,9 +1282,8 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+@@ -971,9 +1283,8 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
      }
      {
          std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
@@ -20901,7 +21067,7 @@ index 45cb9d2..dc1bd32 100644
      }
  
      LoadedModule module;
-@@ -1009,6 +1319,29 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+@@ -1009,6 +1320,29 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
                                        elfCrc32,
                                        elfCrc32Valid);
  
@@ -20931,7 +21097,7 @@ index 45cb9d2..dc1bd32 100644
      RUNTIME_LOG("ELF file loaded successfully. Entry point: 0x" << std::hex << m_cpuContext.pc << std::dec);
      return true;
  }
-@@ -1064,6 +1397,16 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+@@ -1064,6 +1398,16 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
          paths.cdRoot = paths.elfDirectory;
          paths.mcRoot = paths.elfDirectory / "mc0";
      }
@@ -20948,7 +21114,7 @@ index 45cb9d2..dc1bd32 100644
  
      setIoPaths(paths);
  }
-@@ -1134,9 +1477,96 @@ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
+@@ -1134,9 +1478,96 @@ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
      }
  }
  
@@ -21045,7 +21211,7 @@ index 45cb9d2..dc1bd32 100644
  
      uint32_t slot = 0u;
      if (generatedFunctionTableSlot(address, slot))
-@@ -1273,6 +1703,31 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
+@@ -1273,6 +1704,31 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
          readGuestU32Offset(a0Word0, 0x08u, vtableSlot8) &&
          readGuestU32Offset(a0Word0, 0x0cu, vtableSlotC);
  
@@ -21077,7 +21243,7 @@ index 45cb9d2..dc1bd32 100644
      if (firstReport)
      {
          std::ostringstream oss;
-@@ -1356,14 +1811,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1356,14 +1812,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
      // Every inter-function transfer is also a deterministic EE safe point.
      // Backward edges inside generated functions use eeCheckpointDue(), while
      // this charge bounds straight-line call chains that have no local loop.
@@ -21095,7 +21261,7 @@ index 45cb9d2..dc1bd32 100644
          {
              reportMissingFunction(rdram, ctx, targetPc, sourcePc, kind, debugName);
          }
-@@ -1396,15 +1852,37 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1396,15 +1853,37 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
  
      RecompiledFunction targetFn = lookupFunction(targetPc);
      const uint32_t entryPc = ctx->pc;
@@ -21133,7 +21299,7 @@ index 45cb9d2..dc1bd32 100644
          ctx->pc = fallthroughPc;
      }
  
-@@ -1423,7 +1901,16 @@ void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
+@@ -1423,7 +1902,16 @@ void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
                         exception == EXCEPTION_TLB_REFILL);
  }
  
@@ -21150,7 +21316,7 @@ index 45cb9d2..dc1bd32 100644
  {
      (void)rdram;
  
-@@ -1442,7 +1929,7 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
+@@ -1442,7 +1930,7 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
      m_vu0.execute(vu0Code, PS2_VU0_CODE_SIZE,
                    vu0Data, PS2_VU0_DATA_SIZE,
                    m_gs, &m_memory,
@@ -21159,7 +21325,7 @@ index 45cb9d2..dc1bd32 100644
      copyVu0StateToContext(m_vu0.state(), ctx);
  }
  
-@@ -1468,6 +1955,15 @@ void PS2Runtime::handleSyscall(uint8_t *rdram, R5900Context *ctx, uint32_t encod
+@@ -1468,6 +1956,15 @@ void PS2Runtime::handleSyscall(uint8_t *rdram, R5900Context *ctx, uint32_t encod
      const uint32_t syscallId = (encodedSyscallId != 0u)
                                     ? encodedSyscallId
                                     : getRegU32(ctx, 3); // $v1 / $3 is the EE kernel syscall number
@@ -21175,7 +21341,7 @@ index 45cb9d2..dc1bd32 100644
  
      if (ps2_syscalls::dispatchNumericSyscall(syscallId, rdram, ctx, this))
      {
-@@ -1483,12 +1979,138 @@ void PS2Runtime::handleBreak(uint8_t *rdram, R5900Context *ctx)
+@@ -1483,12 +1980,138 @@ void PS2Runtime::handleBreak(uint8_t *rdram, R5900Context *ctx)
      raiseCop0Exception(ctx, EXCEPTION_BREAKPOINT);
  }
  
@@ -21314,7 +21480,7 @@ index 45cb9d2..dc1bd32 100644
  }
  
  void PS2Runtime::handleTrap(uint8_t *rdram, R5900Context *ctx)
-@@ -1820,7 +2442,14 @@ uint32_t PS2Runtime::guestMalloc(uint32_t size, uint32_t alignment)
+@@ -1820,7 +2443,14 @@ uint32_t PS2Runtime::guestMalloc(uint32_t size, uint32_t alignment)
  {
      std::lock_guard<std::mutex> lock(m_guestHeapMutex);
      ensureGuestHeapInitializedLocked();
@@ -21330,7 +21496,7 @@ index 45cb9d2..dc1bd32 100644
  }
  
  uint32_t PS2Runtime::guestCalloc(uint32_t count, uint32_t size, uint32_t alignment)
-@@ -2107,6 +2736,14 @@ void PS2Runtime::Store16(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint
+@@ -2107,6 +2737,14 @@ void PS2Runtime::Store16(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint
  void PS2Runtime::Store32(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint32_t value)
  {
      ps2TraceGuestWrite(rdram, vaddr, 4u, value, 0u, "WRITE32", ctx);
@@ -21345,7 +21511,7 @@ index 45cb9d2..dc1bd32 100644
      try
      {
          m_memory.write32(vaddr, value);
-@@ -2165,6 +2802,7 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
+@@ -2165,6 +2803,7 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
      ps2TraceGuestWrite(rdram, GIF_TADR, 4u, tadr, 0u, "WRITE32", ctx);
      m_memory.writeIORegister(GIF_TADR, tadr);
      ps2TraceGuestWrite(rdram, GIF_CHCR, 4u, chcr, 0u, "WRITE32", ctx);
@@ -21353,7 +21519,7 @@ index 45cb9d2..dc1bd32 100644
      if (m_memory.tryProcessNativeGifImageUploadChain(m_gs, tadr, chcr))
      {
          drainCompletedDmacHandlers(rdram);
-@@ -2209,9 +2847,26 @@ void PS2Runtime::postEeEvent(EeEvent event)
+@@ -2209,9 +2848,26 @@ void PS2Runtime::postEeEvent(EeEvent event)
      m_eeScheduler->postEvent(event);
  }
  
@@ -21381,7 +21547,7 @@ index 45cb9d2..dc1bd32 100644
  }
  
  [[noreturn]] void PS2Runtime::eeWaitVSyncTicks(uint32_t ticks, uint32_t resumePc)
-@@ -2339,6 +2994,91 @@ void PS2Runtime::HandleIntegerOverflow(R5900Context *ctx)
+@@ -2339,6 +2995,91 @@ void PS2Runtime::HandleIntegerOverflow(R5900Context *ctx)
      raiseCop0Exception(ctx, EXCEPTION_INTEGER_OVERFLOW);
  }
  
@@ -21473,7 +21639,7 @@ index 45cb9d2..dc1bd32 100644
  void PS2Runtime::run()
  {
      m_stopRequested.store(false, std::memory_order_relaxed);
-@@ -2347,6 +3087,16 @@ void PS2Runtime::run()
+@@ -2347,6 +3088,16 @@ void PS2Runtime::run()
      ps2_stubs::resetAudioStubState();
      ps2_stubs::resetMpegStubState();
      initializeEeKernelState(m_memory.getRDRAM());
@@ -21490,7 +21656,7 @@ index 45cb9d2..dc1bd32 100644
      m_cpuContext.r[4] = _mm_setzero_si128();
      m_cpuContext.r[5] = _mm_setzero_si128();
      m_cpuContext.r[29] = _mm_set_epi64x(0, static_cast<int64_t>(PS2_RAM_SIZE - 0x10u));
-@@ -2386,11 +3136,42 @@ void PS2Runtime::run()
+@@ -2386,11 +3137,42 @@ void PS2Runtime::run()
          gameThreadFinished.store(true, std::memory_order_release); });
  
      uint64_t tick = 0;
@@ -21535,7 +21701,7 @@ index 45cb9d2..dc1bd32 100644
              {
                  uint64_t curDma = m_memory.dmaStartCount();
                  uint64_t curGif = m_memory.gifCopyCount();
-@@ -2403,7 +3184,71 @@ void PS2Runtime::run()
+@@ -2403,7 +3185,71 @@ void PS2Runtime::run()
                  const uint32_t dbgGp = m_debugGp.load(std::memory_order_relaxed);
                  const auto eeSnapshot = m_eeScheduler->snapshot();
  
@@ -21608,7 +21774,7 @@ index 45cb9d2..dc1bd32 100644
                                                 << " pc=0x" << std::hex << dbgPc
                                                 << " ra=0x" << dbgRa
                                                 << " sp=0x" << dbgSp
-@@ -2416,35 +3261,141 @@ void PS2Runtime::run()
+@@ -2416,35 +3262,134 @@ void PS2Runtime::run()
                                                 << " gif=" << curGif
                                                 << " gsw=" << curGs
                                                 << " vif=" << curVif
@@ -21664,17 +21830,10 @@ index 45cb9d2..dc1bd32 100644
 -        const float dstWidth = srcWidth * scale;
 -        const float dstHeight = srcHeight * scale;
 +        // Otavix (01/11): o PS2 foi feito para TV 4:3 — o quadro interno (512x448, 640x448...) tem pixels não quadrados.
-+        // PS2X_ASPECTO = 4:3 (padrão) | 16:9 (jogos com modo widescreen) | nativo (pixels quadrados, como antes)
-+        static const float aspecto = []
-+        {
-+            const char *e = std::getenv("PS2X_ASPECTO");
-+            const std::string s = e ? e : "4:3";
-+            if (s == "nativo")
-+                return 0.0f;
-+            if (s == "16:9")
-+                return 16.0f / 9.0f;
-+            return 4.0f / 3.0f;
-+        }();
++        // PS2X_ASPECTO = 4:3 (padrão) | 16:9 | 21:9 | 32:9 | L:A | tela | nativo (pixels quadrados, como antes);
++        // (02/11) mais largo que 4:3 o vblank também grava a proporção no jogo (otx_aspecto.h)
++        const float aspecto = otx_aspecto::pedido(screenWidth, screenHeight);
++        otx_aspecto::define(aspecto);
 +        const float srcAspecto = aspecto > 0.0f ? aspecto : srcWidth / srcHeight;
 +        const float dstHeight = std::min(screenHeight, screenWidth / srcAspecto);
 +        const float dstWidth = dstHeight * srcAspecto;
