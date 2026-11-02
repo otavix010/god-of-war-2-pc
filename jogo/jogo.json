@@ -1,0 +1,29 @@
+{
+    "nome": "God of War II",
+    "serial": "SCUS-97481",
+    "elf": "SCUS_974.81",
+    "cd_root": "",
+    "exe": "god-of-war-2.exe",
+    "iso_sha1": [
+        "1dcb9adde645d06bb2b4747070664bfdd51bb287"
+    ],
+    "elf_sha1": [
+        "e6a62a0f3e781c29513f563f4625b9b3a9103c56"
+    ],
+    "versao": "americana, SCUS-97481",
+    "ambiente": {
+        "PS2X_VU1_NATIVO": "1",
+        "PS2X_GS_THREAD": "1",
+        "PS2X_MTVU": "1",
+        "PS2X_GS_FILA": "65536",
+        "PS2X_MTVU_FILA": "2048",
+        "PS2X_GS_THREADS": "4",
+        "PS2X_GS_GIRO": "0",
+        "PS2X_RELOGIO_REAL": "1",
+        "PS2X_MPEG_CALLBACK_SINCRONO": "1",
+        "PS2X_MPEG_IPU_FONTE": "1",
+        "PS2X_GS_INTC_ATRASO_US": "500",
+        "PS2X_POKE_30": "2D80B8=30"
+    },
+    "vu1_quentes": "todos"
+}

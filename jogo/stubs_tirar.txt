@@ -1,0 +1,1 @@
+sceCdInit  # Otavix 30/10: o libcdvd do GoW roda o código original (RPC para o cdvdfsv do host); o init faz os sceSifBindRpc
