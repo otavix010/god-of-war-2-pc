@@ -2759,10 +2759,10 @@ index 182f786..a05aafd 100644
  }
 diff --git a/ps2xIOP/src/emulator/imports/iop_sio2.cpp b/ps2xIOP/src/emulator/imports/iop_sio2.cpp
 new file mode 100644
-index 0000000..029cdcd
+index 0000000..9d7de10
 --- /dev/null
 +++ b/ps2xIOP/src/emulator/imports/iop_sio2.cpp
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,568 @@
 +#include "iop_sio2.h"
 +
 +#include "../core/iop_cpu.h"
@@ -2872,14 +2872,14 @@ index 0000000..029cdcd
 +            const uint32_t n = std::min<uint32_t>(tamanho, std::min<uint32_t>(inTam - pos, static_cast<uint32_t>(saida.size()) - std::min<uint32_t>(pos, static_cast<uint32_t>(saida.size()))));
 +            const bool presente = comando(porta, entrada.data() + pos, saida.data() + pos, n);
 +            todosPresentes = todosPresentes && presente;
-+            if (logLigado() && m_logs < 300u)
++            if (logLigado() && presente && porta >= 2 && m_logs < 4000u)
 +            {
 +                ++m_logs;
 +                std::fprintf(stderr, "[sio2] porta=%d tam=%u %s in:", porta, tamanho, presente ? "ok" : "vazia");
-+                for (uint32_t k = 0; k < std::min<uint32_t>(n, 9u); ++k)
++                for (uint32_t k = 0; k < std::min<uint32_t>(n, 24u); ++k)
 +                    std::fprintf(stderr, " %02x", entrada[pos + k]);
 +                std::fprintf(stderr, " out:");
-+                for (uint32_t k = 0; k < std::min<uint32_t>(n, 9u); ++k)
++                for (uint32_t k = 0; k < std::min<uint32_t>(n, 24u); ++k)
 +                    std::fprintf(stderr, " %02x", saida[pos + k]);
 +                std::fprintf(stderr, "\n");
 +            }
@@ -3004,6 +3004,119 @@ index 0000000..029cdcd
 +        constexpr uint32_t kPagina = 512u, kPaginaEcc = 528u, kPaginasBloco = 16u, kPaginas = 16384u;
 +        constexpr uint32_t kTamCartao = kPaginaEcc * kPaginas; // 8.650.752 bytes (formato .ps2 do PCSX2)
 +
++        // Otavix (03/11): cartão novo já FORMATADO (como o "formatar" do console / mymc): o MC2_D do Ghost Rider só dizia
++        // "Load failed" com o cartão em branco. Layout do cartão de 8 MB: superbloco na página 0, FAT indireta no cluster 8,
++        // FAT nos clusters 9..40, área alocável a partir do cluster 41 (cluster 0 alocável = diretório raiz com "." e
++        // ".."), ECC de Hamming (3 bytes a cada 128) nos 16 bytes de reserva de cada página.
++        void otxEccBloco(const uint8_t *d, uint8_t *ecc)
++        {
++            static uint8_t paridade[256], colunas[256];
++            static bool pronto = false;
++            if (!pronto)
++            {
++                static const uint8_t mascaras[7] = {0x55, 0x33, 0x0F, 0x00, 0xAA, 0xCC, 0xF0};
++                for (int b = 0; b < 256; ++b)
++                {
++                    int x = b;
++                    x ^= x >> 1;
++                    x ^= x >> 2;
++                    x ^= x >> 4;
++                    paridade[b] = static_cast<uint8_t>(x & 1);
++                }
++                for (int b = 0; b < 256; ++b)
++                {
++                    uint8_t m = 0;
++                    for (int i = 0; i < 7; ++i)
++                        m |= static_cast<uint8_t>(paridade[b & mascaras[i]] << i);
++                    colunas[b] = m;
++                }
++                pronto = true;
++            }
++            uint8_t cp = 0x77, lp0 = 0x7F, lp1 = 0x7F;
++            for (int i = 0; i < 128; ++i)
++            {
++                cp ^= colunas[d[i]];
++                if (paridade[d[i]])
++                {
++                    lp0 ^= static_cast<uint8_t>(~i);
++                    lp1 ^= static_cast<uint8_t>(i);
++                }
++            }
++            ecc[0] = cp;
++            ecc[1] = static_cast<uint8_t>(lp0 & 0x7F);
++            ecc[2] = lp1;
++        }
++
++        void otxPaginaComEcc(std::vector<uint8_t> &img, uint32_t pagina, const uint8_t *dados512)
++        {
++            uint8_t *p = img.data() + static_cast<size_t>(pagina) * 528u;
++            std::memcpy(p, dados512, 512);
++            std::memset(p + 512, 0, 16);
++            for (int k = 0; k < 4; ++k)
++                otxEccBloco(dados512 + k * 128, p + 512 + k * 3);
++        }
++
++        void otxFormataCartao(std::vector<uint8_t> &img)
++        {
++            constexpr uint32_t paginas = 16384u, epc = 256u, primeiraIfc = 8u, fatClusters = 32u, alocOff = 41u;
++            constexpr uint32_t alocFim = 1022u * 8u - alocOff; // 8135
++            img.assign(static_cast<size_t>(paginas) * 528u, 0u);
++            std::vector<uint8_t> zero(512, 0u);
++            for (uint32_t pg = 0; pg < paginas; ++pg)
++                otxPaginaComEcc(img, pg, zero.data());
++            auto cluster = [&](uint32_t n, const std::vector<uint8_t> &c1024)
++            {
++                otxPaginaComEcc(img, n * 2u, c1024.data());
++                otxPaginaComEcc(img, n * 2u + 1u, c1024.data() + 512);
++            };
++            auto poe32 = [](std::vector<uint8_t> &v, size_t off, uint32_t x) { std::memcpy(v.data() + off, &x, 4); };
++            // FAT indireta: lista dos clusters de FAT
++            std::vector<uint8_t> c(1024, 0u);
++            for (uint32_t i = 0; i < epc; ++i)
++                poe32(c, i * 4u, i < fatClusters ? primeiraIfc + 1u + i : 0xFFFFFFFFu);
++            cluster(primeiraIfc, c);
++            // FAT: 0 = raiz (fim de cadeia), 1..alocFim-1 livres, alocFim..8191 fim de cadeia
++            for (uint32_t f = 0; f < fatClusters; ++f)
++            {
++                for (uint32_t i = 0; i < epc; ++i)
++                {
++                    const uint32_t n = f * epc + i;
++                    poe32(c, i * 4u, (n == 0u || n >= alocFim) ? 0xFFFFFFFFu : 0x7FFFFFFFu);
++                }
++                cluster(primeiraIfc + 1u + f, c);
++            }
++            // diretório raiz
++            std::fill(c.begin(), c.end(), static_cast<uint8_t>(0u));
++            auto dirent = [&](size_t off, uint16_t modo, uint32_t tam, const char *nome)
++            {
++                std::memcpy(c.data() + off, &modo, 2);
++                poe32(c, off + 4, tam);
++                const uint8_t tod[8] = {0, 0, 0, 12, 1, 1, 0xD0, 0x07}; // 01/01/2000 12:00:00
++                std::memcpy(c.data() + off + 8, tod, 8);
++                std::memcpy(c.data() + off + 24, tod, 8);
++                std::memcpy(c.data() + off + 64, nome, std::strlen(nome));
++            };
++            dirent(0, 0x8427, 2u, ".");
++            dirent(512, 0xA426, 0u, "..");
++            cluster(alocOff, c);
++            // superbloco
++            std::vector<uint8_t> sb(512, 0u);
++            std::memcpy(sb.data(), "Sony PS2 Memory Card Format ", 28);
++            std::memcpy(sb.data() + 28, "1.2.0.0", 7);
++            const uint16_t h[4] = {512, 2, 16, 0xFF00};
++            std::memcpy(sb.data() + 40, h, 8);
++            const uint32_t w[6] = {8192u, alocOff, alocFim, 0u, 1023u, 1022u};
++            std::memcpy(sb.data() + 48, w, 24);
++            // 8 bytes vazios, lista da FAT indireta (32), lista de blocos ruins (32 x -1), tipo 2, flags 0x2B
++            poe32(sb, 80, primeiraIfc);
++            std::memset(sb.data() + 208, 0xFF, 128);
++            sb[336] = 2;
++            sb[337] = 0x2B;
++            otxPaginaComEcc(img, 0, sb.data());
++            // bloco de apagamento de reserva (good_block2 = 1022) todo em 0xFF, como o mymc
++            std::memset(img.data() + static_cast<size_t>(1022u * 16u) * 528u, 0xFF, 16u * 528u);
++        }
++
 +        int cartoesLigados()
 +        {
 +            // PS2X_MC_SIO2=1 liga o cartão do slot 1, 2 = os dois. PADRÃO 0 (desligado) até o MC2_D completar: o GoW 1
@@ -3032,7 +3145,12 @@ index 0000000..029cdcd
 +        }
 +        else
 +        {
-+            std::fprintf(stderr, "[sio2:cartao] %d: '%s' novo (vazio, sem formatação)\n", indice + 1, c.caminho.c_str());
++            // PS2X_MC_SIO2_BRANCO=1 cria o cartão em branco (sem formatação), como antes
++            const char *branco = std::getenv("PS2X_MC_SIO2_BRANCO");
++            if (!(branco && branco[0] == '1'))
++                otxFormataCartao(c.dados);
++            std::fprintf(stderr, "[sio2:cartao] %d: '%s' novo (%s)%c", indice + 1, c.caminho.c_str(),
++                         (branco && branco[0] == '1') ? "vazio, sem formatação" : "formatado", 10);
 +            gravaCartao(indice, 0u, kTamCartao);
 +        }
 +        return true;
@@ -8194,7 +8312,7 @@ index e851bd2..cd647e4 100644
      }
  
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
-index 44eaef4..e6d3d1d 100644
+index 44eaef4..cfcbaf3 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/MPEG.cpp
 @@ -1,4 +1,7 @@
@@ -8221,7 +8339,7 @@ index 44eaef4..e6d3d1d 100644
              bool sawSequenceEnd = false;
              bool streamEnded = false;
              bool decoderFailed = false;
-@@ -523,8 +528,168 @@ namespace ps2_stubs
+@@ -523,8 +528,169 @@ namespace ps2_stubs
              uint64_t pts = 0xFFFFFFFFFFFFFFFFull;
              uint64_t dts = 0xFFFFFFFFFFFFFFFFull;
              std::vector<MpegRegisteredCallback> callbacks;
@@ -8352,7 +8470,8 @@ index 44eaef4..e6d3d1d 100644
 +                        lr2[i * 2 + 1] = r[i];
 +                    }
 +                    ps2x::iop::otxVideoPcm(lr2.data(), quadros * 28u);
-+                    if (const char *wd = std::getenv("PS2X_VIDEO_PCM_DUMP")) // diagnóstico: PCM cru 48 kHz estéreo
++                    static const char *otxWd = std::getenv("PS2X_VIDEO_PCM_DUMP");
++                    if (const char *wd = otxWd) // diagnóstico: PCM cru 48 kHz estéreo
 +                        if (FILE *fw = std::fopen(wd, "ab"))
 +                        {
 +                            std::fwrite(lr2.data(), 2, lr2.size(), fw);
@@ -8390,7 +8509,7 @@ index 44eaef4..e6d3d1d 100644
          struct MpegStubState
          {
              bool initialized = false;
-@@ -1331,18 +1496,49 @@ namespace ps2_stubs
+@@ -1331,18 +1497,50 @@ namespace ps2_stubs
                                  pes.pts90k,
                                  pes.dts90k);
                          }
@@ -8438,7 +8557,8 @@ index 44eaef4..e6d3d1d 100644
 +                    const size_t payloadStart = pes.payloadOffset + (streamId == kMpegPrivateStream1 ? otxPula : 0u);
 +                    if (streamId == kMpegPrivateStream1 && pes.payloadOffset + 4u < packetEnd)
 +                        otxPcmEntra(buffer.data() + pes.payloadOffset + 4u, packetEnd - pes.payloadOffset - 4u);
-+                    if (const char *dump = std::getenv("PS2X_MPEG_AUDIO_DUMP"); dump && *dump && payloadStart < packetEnd)
++                    static const char *otxDumpEnv = std::getenv("PS2X_MPEG_AUDIO_DUMP");
++                    if (const char *dump = otxDumpEnv; dump && *dump && payloadStart < packetEnd)
 +                        if (FILE *f = std::fopen(dump, "ab"))
 +                        {
 +                            std::fwrite(buffer.data() + payloadStart, 1, packetEnd - payloadStart, f);
@@ -8447,7 +8567,7 @@ index 44eaef4..e6d3d1d 100644
                      if (payloadStart < packetEnd && payloadStart < playback.pssGuestAddrs.size())
                      {
                          queueStreamCallbackEvent(
-@@ -1583,21 +1779,22 @@ namespace ps2_stubs
+@@ -1583,21 +1781,22 @@ namespace ps2_stubs
                                           R5900Context *callerCtx,
                                           PS2Runtime *runtime,
                                           const MpegStreamCallbackEvent &event,
@@ -8473,7 +8593,7 @@ index 44eaef4..e6d3d1d 100644
                  return;
              }
  
-@@ -1613,10 +1810,35 @@ namespace ps2_stubs
+@@ -1613,10 +1812,35 @@ namespace ps2_stubs
              GuestInvocation invocation{};
              invocation.kind = GuestInvocationKind::RpcCallback;
              invocation.context = callbackCtx;
@@ -8511,7 +8631,7 @@ index 44eaef4..e6d3d1d 100644
              runtime->eeScheduler().queueInvocation(std::move(invocation));
          }
  
-@@ -1652,6 +1874,39 @@ namespace ps2_stubs
+@@ -1652,6 +1876,39 @@ namespace ps2_stubs
              dispatchStreamCallbacks(rdram, ctx, runtime, events);
          }
  
@@ -8551,7 +8671,7 @@ index 44eaef4..e6d3d1d 100644
          void writeBlankMpegFrame(uint8_t *rdram, uint32_t destAddr, uint32_t width, uint32_t height)
          {
              if (!rdram || destAddr == 0u)
-@@ -1873,6 +2128,9 @@ namespace ps2_stubs
+@@ -1873,6 +2130,9 @@ namespace ps2_stubs
          setReturnS32(ctx, 0);
      }
  
@@ -8561,7 +8681,7 @@ index 44eaef4..e6d3d1d 100644
      void sceMpegAddBs(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          const uint32_t mpegAddr = getRegU32(ctx, 4);
-@@ -1899,12 +2157,23 @@ namespace ps2_stubs
+@@ -1899,12 +2159,23 @@ namespace ps2_stubs
                  copied += chunk;
              }
              wakePictureWaiter = playback.decodedFrames.size() != framesBefore || playback.streamEnded || playback.decoderFailed;
@@ -8585,7 +8705,7 @@ index 44eaef4..e6d3d1d 100644
          setReturnS32(ctx, static_cast<int32_t>(copied));
      }
  
-@@ -2014,7 +2283,7 @@ namespace ps2_stubs
+@@ -2014,7 +2285,7 @@ namespace ps2_stubs
          mpegGuestWrite32(rdram, puVar4 + 0x8, a1_init);
          mpegGuestWrite32(rdram, puVar4 + 0xC, a1_init);
  
@@ -8594,7 +8714,7 @@ index 44eaef4..e6d3d1d 100644
          mpegGuestWrite32(rdram, uVar3 + 0x44, allocResult);
  
          // param_1[0..2] = 0; param_1[4..0xe] = 0xffffffff/0 as per decompilation
-@@ -2071,11 +2340,86 @@ namespace ps2_stubs
+@@ -2071,11 +2342,86 @@ namespace ps2_stubs
              std::lock_guard<std::mutex> lock(g_mpeg_stub_mutex);
              g_mpeg_stub_state.callbacksByMpeg.erase(mpegAddr);
              g_mpeg_stub_state.playbackByMpeg.erase(mpegAddr);
@@ -8681,7 +8801,7 @@ index 44eaef4..e6d3d1d 100644
      void sceMpegDemuxPss(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          const uint32_t mpegAddr = getRegU32(ctx, 4);
-@@ -2141,8 +2485,8 @@ namespace ps2_stubs
+@@ -2141,8 +2487,8 @@ namespace ps2_stubs
              });
          }
  
@@ -8692,7 +8812,7 @@ index 44eaef4..e6d3d1d 100644
      }
  
      void sceMpegDemuxPssRing(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
-@@ -2235,8 +2579,8 @@ namespace ps2_stubs
+@@ -2235,8 +2581,8 @@ namespace ps2_stubs
              });
          }
  
@@ -8703,7 +8823,7 @@ index 44eaef4..e6d3d1d 100644
      }
  
      void sceMpegDispCenterOffX(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
-@@ -2280,6 +2624,189 @@ namespace ps2_stubs
+@@ -2280,6 +2626,196 @@ namespace ps2_stubs
          setReturnU32(ctx, getPlaybackState(mpegAddr).decodeMode);
      }
  
@@ -8727,6 +8847,13 @@ index 44eaef4..e6d3d1d 100644
 +                    return;
 +                MpegPlaybackState &playback = getPlaybackState(mpeg);
 +                static const bool ipuFonte = [] { const char *e = std::getenv("PS2X_MPEG_IPU_FONTE"); return e && e[0] == '1'; }(); // Otavix: God of War
++                // Otavix (03/11): com a fonte no demux (PS2X_MPEG_IPU_FONTE=0) o vídeo já chega ao decodificador pelo
++                // sceMpegDemuxPss*; os mesmos dados mandados pela IPU (callback nodata) entravam de novo, intercalados:
++                // blocos danificados ("ac-tex damaged") e vídeo terminando antes da hora. PS2X_MPEG_IPU_MISTURA=1 volta.
++                static const bool mistura = [] { const char *e = std::getenv("PS2X_MPEG_IPU_MISTURA"); return e && e[0] == '1'; }();
++                static const bool fonteDefinida = std::getenv("PS2X_MPEG_IPU_FONTE") != nullptr;
++                if (fonteDefinida && !ipuFonte && !mistura)
++                    return;
 +                if (ipuFonte && !playback.otxIpuFonte)
 +                {
 +                    // Otavix: primeira entrega pela IPU: o que o demux já mandou ao decodificador seria duplicado (o God
@@ -8893,7 +9020,7 @@ index 44eaef4..e6d3d1d 100644
      void sceMpegGetPicture(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          const uint32_t mpegAddr = getRegU32(ctx, 4);
-@@ -2292,7 +2819,39 @@ namespace ps2_stubs
+@@ -2292,7 +2828,39 @@ namespace ps2_stubs
          {
              std::unique_lock<std::mutex> lock(g_mpeg_stub_mutex);
              MpegPlaybackState &playback = getPlaybackState(mpegAddr);
@@ -8933,7 +9060,7 @@ index 44eaef4..e6d3d1d 100644
                  !g_mpeg_stub_state.currentCdStreamEofSeen &&
                  !playback.streamEnded &&
                  !playback.decoderFailed)
-@@ -2308,6 +2867,8 @@ namespace ps2_stubs
+@@ -2308,6 +2876,8 @@ namespace ps2_stubs
                      ++g_mpeg_stub_state.getPictureWaitTraceCount;
                  }
                  lock.unlock();
@@ -8942,7 +9069,7 @@ index 44eaef4..e6d3d1d 100644
                  runtime->eeScheduler().waitExternal(
                      EeWaitReason::Mpeg,
                      kMpegPictureWaitType,
-@@ -2391,7 +2952,12 @@ namespace ps2_stubs
+@@ -2391,7 +2961,12 @@ namespace ps2_stubs
  
          mpegGuestWrite32(rdram, mpegAddr + 0x00u, width);
          mpegGuestWrite32(rdram, mpegAddr + 0x04u, height);
@@ -8956,7 +9083,7 @@ index 44eaef4..e6d3d1d 100644
  
          if (uint8_t *base = getMemPtr(rdram, mpegAddr))
          {
-@@ -2403,12 +2969,53 @@ namespace ps2_stubs
+@@ -2403,12 +2978,53 @@ namespace ps2_stubs
                  *reinterpret_cast<uint32_t *>(inner + 0xe4) = getRegU32(ctx, 6);
                  *reinterpret_cast<uint32_t *>(inner + 0xdc) = 0;
                  *reinterpret_cast<uint32_t *>(inner + 0xe0) = 0;
@@ -9200,7 +9327,7 @@ index 564d873..788320b 100644
                  result = state.formatted ? kMcResultSucceed : kMcResultNoFormat;
              }
 diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
-index b50a4cf..d6460e6 100644
+index b50a4cf..ba6159c 100644
 --- a/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
 +++ b/ps2xRuntime/src/lib/Kernel/Stubs/Pad.cpp
 @@ -1,3 +1,4 @@
@@ -9208,7 +9335,31 @@ index b50a4cf..d6460e6 100644
  #include "Common.h"
  #include "Pad.h"
  
-@@ -335,6 +336,49 @@ namespace ps2_stubs
+@@ -245,7 +246,9 @@ namespace ps2_stubs
+         void fillPadStatus(uint8_t *data, const PadInputState &state, const PadPortState &portState)
+         {
+             std::memset(data, 0, 32);
+-            data[1] = portState.analogMode ? kPadModeDualShock : kPadModeDigital;
++            // Otavix (03/11): com o modo de pressão ligado (scePadEnterPressMode) o DualShock 2 responde 0x79 (id 7,
++            // 18 bytes). O Drakengard só aceita a porta 1 com 0x79; com 0x73 trocava a leitura por "nada apertado".
++            data[1] = portState.analogMode ? (portState.pressureEnabled ? 0x79u : kPadModeDualShock) : kPadModeDigital;
+             data[2] = static_cast<uint8_t>(state.buttons & 0xFFu);
+             data[3] = static_cast<uint8_t>((state.buttons >> 8) & 0xFFu);
+             data[4] = state.rx;
+@@ -272,6 +275,12 @@ namespace ps2_stubs
+             {
+                 return false;
+             }
++            // Otavix (03/11): só a porta 1 do PS2 (port 0) tem controle; a 2 aparece desconectada, como num console
++            // com um controle só (antes as duas devolviam os mesmos botões).
++            if (port != 0)
++            {
++                return false;
++            }
+ 
+             PadPortState portState;
+             {
+@@ -335,6 +344,49 @@ namespace ps2_stubs
          }
      }
  
@@ -9258,7 +9409,70 @@ index b50a4cf..d6460e6 100644
      void PadSyncCallback(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
      {
          setReturnS32(ctx, 0);
-@@ -685,17 +729,35 @@ namespace ps2_stubs
+@@ -458,7 +510,7 @@ namespace ps2_stubs
+         PadPortState *portState = lookupPadPortStateLocked(static_cast<int>(getRegU32(ctx, 4)),
+                                                            static_cast<int>(getRegU32(ctx, 5)));
+         int32_t state = kPadStateDisconnected;
+-        if (portState && portState->open)
++        if (portState && portState->open && getRegU32(ctx, 4) == 0u)
+         {
+             if (portState->transientState != 0u)
+             {
+@@ -527,16 +579,23 @@ namespace ps2_stubs
+             setReturnS32(ctx, currentId);
+             return;
+         case 3: // PAD_MODECUROFFS
+-            setReturnS32(ctx, 0);
++            setReturnS32(ctx, portState->analogMode ? 1 : 0);
+             return;
+         case 4: // PAD_MODETABLE
++            // Otavix (03/11): como o DualShock 2 de verdade, a tabela tem os dois modos (0 = digital 4,
++            // 1 = analógico 7). Com só o modo atual, o Drakengard procurava o 7, não achava e ficava
++            // configurando o controle para sempre (ignorava o START na tela de título).
+             if (index == -1)
+             {
+-                setReturnS32(ctx, 1); // one available mode
++                setReturnS32(ctx, 2);
+             }
+             else if (index == 0)
+             {
+-                setReturnS32(ctx, currentId);
++                setReturnS32(ctx, kPadTypeDigital);
++            }
++            else if (index == 1)
++            {
++                setReturnS32(ctx, kPadTypeDualShock);
+             }
+             else
+             {
+@@ -637,7 +696,25 @@ namespace ps2_stubs
+         }
+ 
+         ps2TraceGuestRangeWrite(rdram, dataAddr, 32u, "scePadRead", ctx);
+-        if (!readPadPortData(port, slot, runtime, data, dataAddr))
++        const bool otxOk = readPadPortData(port, slot, runtime, data, dataAddr);
++        {
++            // Otavix (03/11): PS2X_DIAG_PAD=1 mostra as leituras (porta, slot, ok, botões) quando os botões mudam
++            static const bool diag = std::getenv("PS2X_DIAG_PAD") != nullptr;
++            static int vezes = 0;
++            static uint32_t ultimo[2] = {0xFFFFFFFFu, 0xFFFFFFFFu};
++            const uint32_t chave = (otxOk ? 1u : 0u) | (static_cast<uint32_t>(port & 0xF) << 4) |
++                                   (static_cast<uint32_t>(data[2]) << 8) | (static_cast<uint32_t>(data[3]) << 16) |
++                                   (static_cast<uint32_t>(data[1]) << 24);
++            if (diag && vezes < 400 && chave != ultimo[port & 1])
++            {
++                ultimo[port & 1] = chave;
++                ++vezes;
++                std::printf("[pad:diag] ra=0x%x porta=%d slot=%d ok=%d d0=%02x d1=%02x d2=%02x d3=%02x dest=0x%x\n",
++                            static_cast<unsigned>(getRegU32(ctx, 31)), port, slot, otxOk ? 1 : 0, data[0], data[1],
++                            data[2], data[3], static_cast<unsigned>(dataAddr));
++            }
++        }
++        if (!otxOk)
+         {
+             setReturnS32(ctx, 0);
+             return;
+@@ -685,17 +762,35 @@ namespace ps2_stubs
          setReturnS32(ctx, 0);
      }
  
@@ -10976,7 +11190,7 @@ index 0000000..bea6414
 +void otxGuardaFim(uint8_t *, uint32_t) {}
 +#endif
 diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
-index f0ad507..82dee18 100644
+index f0ad507..c15e59f 100644
 --- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
 @@ -1,4 +1,9 @@
@@ -10990,7 +11204,7 @@ index f0ad507..82dee18 100644
  #include "runtime/gs/ps2_gs_common.h"
  #include "runtime/gs/ps2_gs_psmct16.h"
  #include "runtime/gs/ps2_gs_psmct32.h"
-@@ -8,17 +13,36 @@
+@@ -8,17 +13,55 @@
  #include "ps2_log.h"
  #include <atomic>
  #include <algorithm>
@@ -11013,6 +11227,25 @@ index f0ad507..82dee18 100644
 +// Otavix (patch_gs_lote): esta thread desenha sÃ³ as linhas com (y / 8) % t_otxFaixas == t_otxFaixa
 +bool otxQuadroSobreposto(const GSContext &ctx);
 +static thread_local int t_otxFaixas = 1, t_otxFaixa = 0;
++// Otavix (03/11): quadro com páginas sobrepostas desenhado em paralelo POR PÁGINA de memória: esta thread só escreve os
++// pixels cuja página do FB (no layout do PSM do quadro) cai em (página % t_otxPagN) == t_otxPagK. Dois pixels que caem
++// na mesma memória estão na mesma página, logo na mesma thread, e a ordem entre eles se mantém (0 = desligado).
++static thread_local int t_otxPagN = 0, t_otxPagK = 0;
++static inline bool otxPsm16(uint32_t psm) { return psm == 0x02u || psm == 0x0Au || psm == 0x32u || psm == 0x3Au; }
++// Otavix (03/11): PS2X_DIAG_PIXEL=<fbp hex>,<x>,<y> lido uma vez ao carregar (no WritePixel só compara um inteiro)
++static int g_otxDiagPixel[3] = {-1, -1, -1};
++static const bool g_otxDiagPixelLido = []
++{
++    if (const char *e = std::getenv("PS2X_DIAG_PIXEL"))
++    {
++        unsigned f = 0; int xx = 0, yy = 0;
++        if (std::sscanf(e, "%x,%d,%d", &f, &xx, &yy) == 3)
++        {
++            g_otxDiagPixel[0] = static_cast<int>(f); g_otxDiagPixel[1] = xx; g_otxDiagPixel[2] = yy;
++        }
++    }
++    return true;
++}();
 +// Otavix (lote assÃ­ncrono): CLUT decodificada do lote que esta thread de faixa estÃ¡ desenhando
 +static thread_local const uint32_t *t_otxLutLote = nullptr;
 +
@@ -11027,7 +11260,7 @@ index f0ad507..82dee18 100644
      float fabsQ(float q)
      {
          return (std::fabs(q) > 1.0e-8f) ? q : 1.0f;
-@@ -49,7 +73,7 @@ namespace
+@@ -49,7 +92,7 @@ namespace
          return static_cast<u32>(r) | (g << 8) | (b << 16) | (a << 24);
      }
  
@@ -11036,7 +11269,7 @@ index f0ad507..82dee18 100644
      {
          if (psm == GS_PSM_CT32)
              return texel;
-@@ -60,13 +84,18 @@ namespace
+@@ -60,13 +103,18 @@ namespace
          const bool rgbZero = r == 0u && g == 0u && b == 0u;
          uint8_t a = static_cast<uint8_t>((texel >> 24) & 0xFFu);
  
@@ -11055,7 +11288,7 @@ index f0ad507..82dee18 100644
              if ((a & 0x80u) != 0u)
                  a = texa.ta1;
              else
-@@ -170,7 +199,7 @@ namespace
+@@ -170,7 +218,7 @@ namespace
          }
      };
  
@@ -11064,7 +11297,7 @@ index f0ad507..82dee18 100644
      {
          const bool pass = passesAlphaTest(testReg, alpha);
          if (pass)
-@@ -195,7 +224,7 @@ namespace
+@@ -195,7 +243,7 @@ namespace
          }
      }
  
@@ -11073,7 +11306,7 @@ index f0ad507..82dee18 100644
      {
          const bool date = ((testReg >> 14) & 0x1u) != 0u;
          if (!date)
-@@ -225,7 +254,7 @@ namespace
+@@ -225,7 +273,7 @@ namespace
          uint8_t a;
      };
  
@@ -11082,7 +11315,7 @@ index f0ad507..82dee18 100644
                                          uint8_t vr,
                                          uint8_t vg,
                                          uint8_t vb,
-@@ -292,11 +321,38 @@ namespace
+@@ -292,11 +340,38 @@ namespace
          return psm == GS_PSM_T8 || psm == GS_PSM_T8H;
      }
  
@@ -11122,7 +11355,7 @@ index f0ad507..82dee18 100644
      }
  }
  
-@@ -519,20 +575,46 @@ void GSCpuBackend::Initialize(uint8_t *vram, uint32_t vramSize)
+@@ -519,20 +594,46 @@ void GSCpuBackend::Initialize(uint8_t *vram, uint32_t vramSize)
          throw std::invalid_argument("GS CPU backend requires at least 4 MiB of VRAM");
  
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -11169,7 +11402,7 @@ index f0ad507..82dee18 100644
      m_clutCbp.fill(0u);
      m_texturePageCache.Invalidate();
      m_transfer = {};
-@@ -551,9 +633,34 @@ void GSCpuBackend::Submit(const GSPrimitiveBatch &batch)
+@@ -551,9 +652,34 @@ void GSCpuBackend::Submit(const GSPrimitiveBatch &batch)
      DrawPrimitive(batch);
  }
  
@@ -11204,7 +11437,7 @@ index f0ad507..82dee18 100644
      if (!m_vram || (!isFourBitIndexedPsm(tex0.psm) && !isEightBitIndexedPsm(tex0.psm)))
          return;
  
-@@ -585,6 +692,30 @@ void GSCpuBackend::LoadClut(const GSTex0Reg &tex0, const GSTexClutReg &texclut)
+@@ -585,6 +711,30 @@ void GSCpuBackend::LoadClut(const GSTex0Reg &tex0, const GSTexClutReg &texclut)
          return;
      }
  
@@ -11235,7 +11468,7 @@ index f0ad507..82dee18 100644
      LoadClutUnlocked(tex0, texclut);
  }
  
-@@ -627,10 +758,12 @@ void GSCpuBackend::LoadClutUnlocked(const GSTex0Reg &tex0, const GSTexClutReg &t
+@@ -627,10 +777,12 @@ void GSCpuBackend::LoadClutUnlocked(const GSTex0Reg &tex0, const GSTexClutReg &t
          if (sixteenBit)
          {
              m_clut[destination] = static_cast<uint16_t>(raw);
@@ -11248,7 +11481,7 @@ index f0ad507..82dee18 100644
              m_clut[destination + 256u] = static_cast<uint16_t>(raw >> 16u);
          }
      }
-@@ -644,6 +777,8 @@ void GSCpuBackend::Flush()
+@@ -644,6 +796,8 @@ void GSCpuBackend::Flush()
  void GSCpuBackend::TextureFlush()
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -11257,7 +11490,7 @@ index f0ad507..82dee18 100644
      m_texturePageCache.Invalidate();
  }
  
-@@ -655,6 +790,9 @@ void GSCpuBackend::Sync(GSSyncReason)
+@@ -655,6 +809,9 @@ void GSCpuBackend::Sync(GSSyncReason)
  uint32_t GSCpuBackend::ReadVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y) const
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -11267,7 +11500,7 @@ index f0ad507..82dee18 100644
      return ReadVramUnlocked(psm, base, bw, x, y);
  }
  
-@@ -665,17 +803,26 @@ uint32_t GSCpuBackend::ReadVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw
+@@ -665,17 +822,26 @@ uint32_t GSCpuBackend::ReadVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw
      return m_readVramFuncs[psm & 0x3Fu](m_vram, base, bw, x, y);
  }
  
@@ -11296,7 +11529,28 @@ index f0ad507..82dee18 100644
      WriteVramUnlocked(psm, base, bw, x, y, value);
  }
  
-@@ -689,18 +836,69 @@ void GSCpuBackend::WriteVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw, u
+@@ -684,23 +850,90 @@ void GSCpuBackend::WriteVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw, u
+     if (!m_vram)
+         return;
+     m_writeVramFuncs[psm & 0x3Fu](m_vram, base, bw, x, y, value);
++    // Otavix (03/11, diagnóstico): PS2X_DIAG_ENDERECO=<byte hex> registra quem muda os 4 bytes desse endereço da VRAM
++    static const long diagEnd = [] { const char *e = std::getenv("PS2X_DIAG_ENDERECO"); return e ? std::strtol(e, nullptr, 16) : -1L; }();
++    if (diagEnd >= 0)
++    {
++        static uint32_t ultimo = 0u;
++        static int registros = 0;
++        uint32_t agora = 0u;
++        std::memcpy(&agora, m_vram + (diagEnd & ~3L), 4);
++        if (agora != ultimo && registros < 400)
++        {
++            ++registros;
++            std::fprintf(stderr, "[diag-end] psm=%x base=%x bw=%u x=%u y=%u valor=%08x mem=%08x%c", psm, base, bw, x, y, value, agora, 10);
++            std::fflush(stderr);
++        }
++        ultimo = agora;
++    }
+ }
+ 
  void GSCpuBackend::SnapshotVram(std::vector<uint8_t> &out) const
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -11366,7 +11620,7 @@ index f0ad507..82dee18 100644
      GSTransferSnapshot result = m_transferState;
      result.localToHostPendingBytes = m_localToHostReadPos < m_localToHostBuffer.size()
                                           ? m_localToHostBuffer.size() - m_localToHostReadPos
-@@ -708,10 +906,315 @@ GSTransferSnapshot GSCpuBackend::GetTransferSnapshot() const
+@@ -708,10 +941,315 @@ GSTransferSnapshot GSCpuBackend::GetTransferSnapshot() const
      return result;
  }
  
@@ -11682,7 +11936,7 @@ index f0ad507..82dee18 100644
      PS2_IF_AGRESSIVE_LOGS({
          const uint32_t primitiveIndex = s_debugPrimitiveCount.fetch_add(1u, std::memory_order_relaxed);
          if (primitiveIndex < 64u)
-@@ -818,15 +1321,24 @@ void GSCpuBackend::DrawPrimitive(const GSPrimitiveBatch &batch)
+@@ -818,15 +1356,24 @@ void GSCpuBackend::DrawPrimitive(const GSPrimitiveBatch &batch)
          }
      });
  
@@ -11709,7 +11963,7 @@ index f0ad507..82dee18 100644
          break;
      case GS_PRIM_LINE:
      case GS_PRIM_LINESTRIP:
-@@ -846,7 +1358,7 @@ void GSCpuBackend::DrawPrimitive(const GSPrimitiveBatch &batch)
+@@ -846,7 +1393,7 @@ void GSCpuBackend::DrawPrimitive(const GSPrimitiveBatch &batch)
      }
  }
  
@@ -11718,7 +11972,7 @@ index f0ad507..82dee18 100644
  {
      const auto &ctx = state.context;
      if (x < ctx.scissor.x0 || x > ctx.scissor.x1 || y < ctx.scissor.y0 || y > ctx.scissor.y1)
-@@ -871,13 +1383,17 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+@@ -871,13 +1418,17 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
      const u32 zbp = GSInternal::framePageBaseToBlock(ctx.zbuf.zbp);
      const u32 zpsm = ctx.zbuf.psm;
  
@@ -11738,21 +11992,14 @@ index f0ad507..82dee18 100644
      const bool alphaBlendEnabled = state.prim.abe;
      const bool preserveDestinationAlpha = writeMask.writeRgb && !writeMask.writeAlpha && fpsm == GS_PSM_CT32;
      const bool destinationAlphaTestNeedsRead = ((ctx.test >> 14) & 0x1u) != 0u && (fpsm == GS_PSM_CT32 || fpsm == GS_PSM_CT16 || fpsm == GS_PSM_CT16S);
-@@ -929,6 +1445,24 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+@@ -929,6 +1480,17 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
          break;
      }
  
 +    {
 +        // Otavix (03/11, diagnóstico): PS2X_DIAG_PIXEL=<fbp hex>,<x>,<y> registra o teste de Z e as escritas desse pixel
-+        static int dpx[3] = {-1, -1, -1};
-+        static const bool dpxOk = [] {
-+            const char *e = std::getenv("PS2X_DIAG_PIXEL");
-+            if (!e) return false;
-+            unsigned f = 0; int xx = 0, yy = 0;
-+            if (std::sscanf(e, "%x,%d,%d", &f, &xx, &yy) != 3) return false;
-+            dpx[0] = static_cast<int>(f); dpx[1] = xx; dpx[2] = yy;
-+            return true; }();
-+        if (dpxOk && static_cast<int>(ctx.frame.fbp) == dpx[0] && x == dpx[1] && y == dpx[2])
++        const int *dpx = g_otxDiagPixel;
++        if (dpx[0] >= 0 && static_cast<int>(ctx.frame.fbp) == dpx[0] && x == dpx[1] && y == dpx[2])
 +        {
 +            std::fprintf(stderr, "[diag-pixel] fpsm=%x zpsm=%x zbp=%x ztst=%u z=%08x guardado=%08x passa=%d fb=%08x rgba=%02x%02x%02x%02x abe=%d zmsk=%d tipo=%u tme=%d tbp=%x tpsm=%x tfx=%u tcc=%u fbmsk=%08x alpha=%02x/%02x\n",
 +                         fpsm, zpsm, ctx.zbuf.zbp, ztestMethod, static_cast<uint32_t>(z), storedZ, zpass ? 1 : 0, rawFramebufferPixel, a, b, g, r,
@@ -11763,7 +12010,7 @@ index f0ad507..82dee18 100644
      if (!zpass)
      {
          return;
-@@ -968,9 +1502,9 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
+@@ -968,9 +1530,9 @@ void GSCpuBackend::WritePixel(const GSDrawState &state, int x, int y, int z, uin
                  int cAlpha = (csel == 0) ? a : (csel == 1) ? da
                                                             : fix;
  
@@ -11776,7 +12023,7 @@ index f0ad507..82dee18 100644
              }
              else
              {
-@@ -1055,7 +1589,31 @@ uint32_t GSCpuBackend::LookupCLUT(const GSDrawState &state,
+@@ -1055,7 +1617,31 @@ uint32_t GSCpuBackend::LookupCLUT(const GSDrawState &state,
      return 0xFFFF00FFu;
  }
  
@@ -11809,7 +12056,7 @@ index f0ad507..82dee18 100644
  {
      const auto &ctx = state.context;
      const auto &tex = ctx.tex0;
-@@ -1107,7 +1665,7 @@ uint32_t GSCpuBackend::SampleTexture(const GSDrawState &state, float s, float t,
+@@ -1107,7 +1693,7 @@ uint32_t GSCpuBackend::SampleTexture(const GSDrawState &state, float s, float t,
          case GS_PSM_T4:
          case GS_PSM_T4HL:
          case GS_PSM_T4HH:
@@ -11818,7 +12065,7 @@ index f0ad507..82dee18 100644
          }
  
          return 0xFFFF00FFu;
-@@ -1132,31 +1690,7 @@ uint32_t GSCpuBackend::SampleTexture(const GSDrawState &state, float s, float t,
+@@ -1132,31 +1718,7 @@ uint32_t GSCpuBackend::SampleTexture(const GSDrawState &state, float s, float t,
      const uint32_t c01 = samplePoint(u0, v1);
      const uint32_t c11 = samplePoint(u1, v1);
  
@@ -11851,7 +12098,7 @@ index f0ad507..82dee18 100644
  }
  
  void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
-@@ -1175,9 +1709,12 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+@@ -1175,9 +1737,12 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
      int y1 = static_cast<int>(v1.y) - ofy;
      u32 z1 = static_cast<u32>(v1.z);
  
@@ -11866,7 +12113,7 @@ index f0ad507..82dee18 100644
          std::swap(y0, y1);
  
      const int unclippedX0 = x0;
-@@ -1226,6 +1763,10 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+@@ -1226,6 +1791,10 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
              u1f = (v1.s / q1) * static_cast<float>(texW);
              v1f = (v1.t / q1) * static_cast<float>(texH);
          }
@@ -11877,24 +12124,44 @@ index f0ad507..82dee18 100644
  
          float spriteW = static_cast<float>(spanX);
          float spriteH = static_cast<float>(spanY);
-@@ -1236,6 +1777,8 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+@@ -1234,13 +1803,20 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+         if (spriteH < 1.0f)
+             spriteH = 1.0f;
  
++        const uint32_t otxPagFbw = std::max<uint32_t>(1u, state.context.frame.fbw);
++        const int otxPagH = otxPsm16(state.context.frame.psm) ? 6 : 5;
          for (int y = drawY0; y <= drawY1; ++y)
          {
 +            if (t_otxFaixas > 1 && ((y >> 3) % t_otxFaixas) != t_otxFaixa) // Otavix (lote: sprites em faixas)
 +                continue;
              float ty = (static_cast<float>(y - unclippedY0) + 0.5f) / spriteH;
              float texVf = v0f + (v1f - v0f) * ty;
++            const uint32_t otxPagLinha = static_cast<uint32_t>(y >> otxPagH) * otxPagFbw;
  
-@@ -1270,143 +1813,2213 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+             for (int x = drawX0; x <= drawX1; ++x)
+             {
++                if (t_otxPagN > 1 && static_cast<int>((otxPagLinha + static_cast<uint32_t>(x >> 6)) % static_cast<uint32_t>(t_otxPagN)) != t_otxPagK)
++                    continue;
+                 float tx = (static_cast<float>(x - unclippedX0) + 0.5f) / spriteW;
+                 float texUf = u0f + (u1f - u0f) * tx;
+                 uint32_t texel = 0xFFFF00FFu;
+@@ -1269,136 +1845,2281 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+     }
      else
      {
++        const uint32_t otxPagFbw = std::max<uint32_t>(1u, state.context.frame.fbw);
++        const int otxPagH = otxPsm16(state.context.frame.psm) ? 6 : 5;
          for (int y = drawY0; y <= drawY1; ++y)
 +        {
 +            if (t_otxFaixas > 1 && ((y >> 3) % t_otxFaixas) != t_otxFaixa) // Otavix (lote: sprites em faixas)
 +                continue;
++            const uint32_t otxPagLinha = static_cast<uint32_t>(y >> otxPagH) * otxPagFbw;
              for (int x = drawX0; x <= drawX1; ++x)
++            {
++                if (t_otxPagN > 1 && static_cast<int>((otxPagLinha + static_cast<uint32_t>(x >> 6)) % static_cast<uint32_t>(t_otxPagN)) != t_otxPagK)
++                    continue;
                  WritePixel(state, x, y, z1, r, g, b, a, v1.fog);
++            }
 +        }
      }
  }
@@ -12211,15 +12478,9 @@ index f0ad507..82dee18 100644
 +            }();
 +            return l;
 +        }
- 
--    int ofx = ctx.xyoffset.ofx >> 4;
--    int ofy = ctx.xyoffset.ofy >> 4;
++
 +        int faixas() const { return static_cast<int>(m_ts.size()); }
- 
--    int x0 = static_cast<int>(v0.x) - ofx;
--    int y0 = static_cast<int>(v0.y) - ofy;
--    int x1 = static_cast<int>(v1.x) - ofx;
--    int y1 = static_cast<int>(v1.y) - ofy;
++
 +        // espera ativa curta (PS2X_GS_GIRO microssegundos, padrÃ£o 200) antes de dormir: acordar pelo kernel a cada lote
 +        // custava mais que o prÃ³prio lote
 +        template <typename F>
@@ -13943,7 +14204,26 @@ index f0ad507..82dee18 100644
 +    if (!ligado || ctx.frame.fbw == 0u)
 +        return false;
 +    const int x1 = static_cast<int>(ctx.scissor.x1);
-+    return x1 > 0 && static_cast<uint32_t>(x1) >= ctx.frame.fbw * 64u;
++    const bool sim = x1 > 0 && static_cast<uint32_t>(x1) >= ctx.frame.fbw * 64u;
++    // diagnóstico: PS2X_LOG_SOBREPOSTO=1 lista os quadros que caem na regra (sem repetir)
++    static const bool logS = std::getenv("PS2X_LOG_SOBREPOSTO") != nullptr;
++    if (logS && sim)
++    {
++        static std::mutex m;
++        static std::vector<uint64_t> vistos;
++        const uint64_t k = (static_cast<uint64_t>(ctx.frame.fbp) << 40) | (static_cast<uint64_t>(ctx.frame.fbw) << 32) |
++                           (static_cast<uint64_t>(ctx.frame.psm) << 24) | (static_cast<uint64_t>(x1) << 12) | static_cast<uint64_t>(ctx.scissor.y1);
++        std::lock_guard<std::mutex> l(m);
++        if (vistos.size() < 64 && std::find(vistos.begin(), vistos.end(), k) == vistos.end())
++        {
++            vistos.push_back(k);
++            std::fprintf(stderr, "[sobreposto] fbp=%x fbw=%u psm=%x scissor=%d..%d,%d..%d zbp=%x fbmsk=%08x%c", static_cast<unsigned>(ctx.frame.fbp),
++                         static_cast<unsigned>(ctx.frame.fbw), static_cast<unsigned>(ctx.frame.psm), static_cast<int>(ctx.scissor.x0), x1,
++                         static_cast<int>(ctx.scissor.y0), static_cast<int>(ctx.scissor.y1), static_cast<unsigned>(ctx.zbuf.zbp),
++                         static_cast<unsigned>(ctx.frame.fbmsk), 10);
++        }
++    }
++    return sim;
 +}
 +
 +void GSCpuBackend::otxLoteAdiciona(const GSPrimitiveBatch &batch)
@@ -13962,6 +14242,55 @@ index f0ad507..82dee18 100644
 +    if (otxQuadroSobreposto(ctx))
 +    {
 +        otxLoteDescarrega();
++        // Otavix (03/11): sprites desses quadros em paralelo por página (antes: uma thread só; a névoa do God of War,
++        // 512x832 em vários passes por quadro, derrubava o gameplay para 30 fps). Z/textura no mesmo layout do FB
++        // (CT24/Z24, CT16/Z16): pixels que dividem memória continuam na mesma thread e na mesma ordem.
++        // PS2X_GS_SOBREPOSTO_PAG=0 volta ao serial; PS2X_GS_VERIFICA_PAG=1 compara com o serial e registra diferenças.
++        static const bool porPagina = [] { const char *e = std::getenv("PS2X_GS_SOBREPOSTO_PAG"); return !(e && e[0] == '0'); }();
++        const bool zMesmoLayout = ((ctx.test >> 16) & 1u) == 0u || ctx.zbuf.zmask || otxPsm16(ctx.zbuf.psm) == otxPsm16(ctx.frame.psm);
++        if (porPagina && state.prim.type == GS_PRIM_SPRITE && zMesmoLayout)
++        {
++            const int n = OtxPoolGs::instancia().threads() + 1;
++            const std::function<void(int)> tarefa = [&](int k)
++            {
++                t_otxPagN = n;
++                t_otxPagK = k;
++                otxDesenhaUm(batch);
++                t_otxPagN = 0;
++                t_otxPagK = 0;
++            };
++            static const bool verificaPag = [] { const char *e = std::getenv("PS2X_GS_VERIFICA_PAG"); return e && e[0] == '1'; }();
++            if (verificaPag && m_vram)
++            {
++                static std::vector<uint8_t> antes, serial;
++                static uint64_t nVer = 0, nDif = 0;
++                antes.assign(m_vram, m_vram + m_vramSize);
++                const GSMem::TexturePageCache cacheAntes = m_texturePageCache;
++                otxDesenhaUm(batch);
++                serial.assign(m_vram, m_vram + m_vramSize);
++                std::memcpy(m_vram, antes.data(), m_vramSize);
++                m_texturePageCache = cacheAntes;
++                OtxPoolGs::instancia().rodaTarefas(n, tarefa);
++                ++nVer;
++                if (std::memcmp(m_vram, serial.data(), m_vramSize) != 0)
++                {
++                    size_t nd = 0;
++                    for (size_t k = 0; k < m_vramSize; ++k)
++                        nd += m_vram[k] != serial[k] ? 1u : 0u;
++                    ++nDif;
++                    std::fprintf(stderr, "[gs-pag] DIFERENTE do serial: %zu bytes (psm=%x fbw=%u) %llu/%llu%c", nd,
++                                 static_cast<unsigned>(ctx.frame.psm), static_cast<unsigned>(ctx.frame.fbw),
++                                 static_cast<unsigned long long>(nDif), static_cast<unsigned long long>(nVer), 10);
++                    std::memcpy(m_vram, serial.data(), m_vramSize);
++                }
++                else if ((nVer & 255u) == 1u)
++                    std::fprintf(stderr, "[gs-pag] igual ao serial (%llu verificados, %llu diferentes)%c",
++                                 static_cast<unsigned long long>(nVer), static_cast<unsigned long long>(nDif), 10);
++                return;
++            }
++            OtxPoolGs::instancia().rodaTarefas(n, tarefa);
++            return;
++        }
 +        otxDesenhaUm(batch);
 +        return;
 +    }
@@ -14194,18 +14523,10 @@ index f0ad507..82dee18 100644
 +    const GSVertex &v0 = batch.vertices[0];
 +    const GSVertex &v1 = batch.vertices[1];
 +    const auto &ctx = state.context;
-+
-+    int ofx = ctx.xyoffset.ofx >> 4;
-+    int ofy = ctx.xyoffset.ofy >> 4;
-+
-+    int x0 = static_cast<int>(v0.x) - ofx;
-+    int y0 = static_cast<int>(v0.y) - ofy;
-+    int x1 = static_cast<int>(v1.x) - ofx;
-+    int y1 = static_cast<int>(v1.y) - ofy;
  
-     int dx = std::abs(x1 - x0);
-     int dy = -std::abs(y1 - y0);
-@@ -1460,9 +4073,47 @@ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)
+     int ofx = ctx.xyoffset.ofx >> 4;
+     int ofy = ctx.xyoffset.ofy >> 4;
+@@ -1460,9 +4181,47 @@ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)
      }
  }
  
@@ -14253,7 +14574,7 @@ index f0ad507..82dee18 100644
      m_transfer = command;
      m_transferState.x = command.trxpos.dsax;
      m_transferState.y = command.trxpos.dsay;
-@@ -1471,6 +4122,18 @@ void GSCpuBackend::BeginTransfer(const GSTransferCommand &command)
+@@ -1471,6 +4230,18 @@ void GSCpuBackend::BeginTransfer(const GSTransferCommand &command)
      m_transferState.direction = command.direction;
      m_transferState.localToHostPendingBytes = 0u;
  
@@ -14272,7 +14593,7 @@ index f0ad507..82dee18 100644
      if (command.direction == 2u)
          PerformLocalToLocalTransfer();
      else if (command.direction == 1u)
-@@ -1482,34 +4145,207 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1482,34 +4253,207 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
      std::lock_guard<std::mutex> lock(m_mutex);
      if (!data || sizeBytes == 0u || !m_vram || m_transferState.direction != 0u)
          return;
@@ -14494,7 +14815,7 @@ index f0ad507..82dee18 100644
      {
          switch (dpsm)
          {
-@@ -1520,7 +4356,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1520,7 +4464,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
                  return;
              uint32_t value = 0u;
              std::memcpy(&value, data + offset, sizeof(value));
@@ -14503,7 +14824,7 @@ index f0ad507..82dee18 100644
              offset += 4u;
              advancePixel(1u);
              break;
-@@ -1533,7 +4369,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1533,7 +4477,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
              const uint32_t value = static_cast<uint32_t>(data[offset]) |
                                     (static_cast<uint32_t>(data[offset + 1u]) << 8u) |
                                     (static_cast<uint32_t>(data[offset + 2u]) << 16u);
@@ -14512,7 +14833,7 @@ index f0ad507..82dee18 100644
              offset += 3u;
              advancePixel(1u);
              break;
-@@ -1547,35 +4383,117 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1547,35 +4491,117 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
                  return;
              uint16_t value = 0u;
              std::memcpy(&value, data + offset, sizeof(value));
@@ -14540,6 +14861,12 @@ index f0ad507..82dee18 100644
 -                              m_transfer.trxpos.dsay + (firstPixel / rrw),
 -                              packed & 0x0Fu);
 -            if (firstPixel + 1u < m_transferState.totalPixels)
+-            {
+-                const uint32_t secondPixel = firstPixel + 1u;
+-                WriteVramUnlocked(dpsm, dbp, dbw,
+-                                  dsax + (secondPixel % rrw),
+-                                  m_transfer.trxpos.dsay + (secondPixel / rrw),
+-                                  (packed >> 4u) & 0x0Fu);
 +            const bool quatro = dpsm != GS_PSM_T8 && dpsm != GS_PSM_T8H;
 +            const uint32_t tot = st.totalPixels;
 +            uint32_t c = st.copiedPixels;
@@ -14629,12 +14956,7 @@ index f0ad507..82dee18 100644
 +            }
 +            st.copiedPixels = c;
 +            if (c >= tot)
-             {
--                const uint32_t secondPixel = firstPixel + 1u;
--                WriteVramUnlocked(dpsm, dbp, dbw,
--                                  dsax + (secondPixel % rrw),
--                                  m_transfer.trxpos.dsay + (secondPixel / rrw),
--                                  (packed >> 4u) & 0x0Fu);
++            {
 +                st.direction = 3u;
 +                st.totalPixels = 0u;
 +            }
@@ -14647,7 +14969,7 @@ index f0ad507..82dee18 100644
              break;
          }
          default:
-@@ -1586,6 +4504,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
+@@ -1586,6 +4612,7 @@ void GSCpuBackend::UploadImage(const uint8_t *data, uint32_t sizeBytes)
  
  void GSCpuBackend::PerformLocalToLocalTransfer()
  {
@@ -14655,7 +14977,7 @@ index f0ad507..82dee18 100644
      if (!m_vram)
          return;
  
-@@ -1697,6 +4616,7 @@ void GSCpuBackend::PerformLocalToHostTransfer()
+@@ -1697,6 +4724,7 @@ void GSCpuBackend::PerformLocalToHostTransfer()
  uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -14663,7 +14985,7 @@ index f0ad507..82dee18 100644
      if (!dst || maxBytes == 0u || m_localToHostReadPos >= m_localToHostBuffer.size())
          return 0u;
      const size_t count = std::min<size_t>(maxBytes, m_localToHostBuffer.size() - m_localToHostReadPos);
-@@ -1709,6 +4629,7 @@ uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
+@@ -1709,6 +4737,7 @@ uint32_t GSCpuBackend::ConsumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
  {
      std::lock_guard<std::mutex> lock(m_mutex);
@@ -14671,7 +14993,7 @@ index f0ad507..82dee18 100644
      if (!m_vram || context.frame.fbw == 0u)
          return false;
  
-@@ -1725,6 +4646,13 @@ bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
+@@ -1725,6 +4754,13 @@ bool GSCpuBackend::ClearFramebuffer(const GSContext &context, uint32_t rgba)
  
      const uint32_t fbp = GSInternal::framePageBaseToBlock(context.frame.fbp);
      const uint32_t fbw = std::max<uint32_t>(context.frame.fbw, 1u);
@@ -14685,7 +15007,7 @@ index f0ad507..82dee18 100644
      if (context.frame.psm == GS_PSM_CT32 || context.frame.psm == GS_PSM_CT24)
      {
          const uint32_t source = static_cast<uint32_t>(r) |
-@@ -1862,7 +4790,15 @@ PresentationFrame GSCpuBackend::PresentFromLocalMemory(const GSPresentationReque
+@@ -1862,7 +4898,15 @@ PresentationFrame GSCpuBackend::PresentFromLocalMemory(const GSPresentationReque
      PresentationFrame result{};
      const GSPmodeState pmode = decodePmode(request.pmode);
      const GSSmode2State smode2 = decodeSMode2(request.smode2);
@@ -14702,7 +15024,7 @@ index f0ad507..82dee18 100644
      const bool oddField = (request.vsyncTick & 1ull) != 0ull;
      const GSFrameReg displayFrame1 = decodeDisplayFrame(request.dispfb1);
      const GSFrameReg displayFrame2 = decodeDisplayFrame(request.dispfb2);
-@@ -1871,6 +4807,26 @@ PresentationFrame GSCpuBackend::PresentFromLocalMemory(const GSPresentationReque
+@@ -1871,6 +4915,26 @@ PresentationFrame GSCpuBackend::PresentFromLocalMemory(const GSPresentationReque
      uint32_t width1 = 0u, height1 = 0u, width2 = 0u, height2 = 0u;
      decodeDisplaySize(request.display1, width1, height1);
      decodeDisplaySize(request.display2, width2, height2);
@@ -14730,7 +15052,7 @@ index f0ad507..82dee18 100644
      const bool valid2 = pmode.enableCrt2 && hasDisplaySetup(request.display2, displayFrame2);
      if (!valid1 && !valid2)
 diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
-index 9281d5f..ab25efd 100644
+index 9281d5f..4321b3f 100644
 --- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 +++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
 @@ -1,15 +1,28 @@
@@ -15367,10 +15689,14 @@ index 9281d5f..ab25efd 100644
          break;
      }
      case GS_REG_LABEL:
-@@ -1527,8 +2040,125 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+@@ -1527,8 +2040,131 @@ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
  
  void GS::vertexKick(bool drawing)
  {
++    // Otavix (03/11): os diagnósticos abaixo só rodam se algum foi pedido. Antes chamavam std::getenv a cada vértice
++    // (no Windows trava e percorre o ambiente): o God of War caiu de 60 para 20 fps.
++    static const bool otxDiagKick = std::getenv("PS2X_GS_ZDUMP") || std::getenv("PS2X_GS_PULA_TBP");
++    if (otxDiagKick)
 +    {
 +        // Otavix (03/11, diagnóstico): PS2X_GS_PULA_TBP=<tbp hex>[,<tbp>...] não desenha as primitivas com essas texturas
 +        static const std::vector<uint32_t> pula = []
@@ -15406,12 +15732,14 @@ index 9281d5f..ab25efd 100644
 +            static const int gn = std::getenv("PS2X_GS_ZDUMP_N") ? std::atoi(std::getenv("PS2X_GS_ZDUMP_N")) : 1;
 +            static int contados = 0;
 +            static const bool todos = std::getenv("PS2X_GS_ZDUMP_TODOS") != nullptr; // qualquer primitiva (N = k-ésima)
++            static const char *gfbp = std::getenv("PS2X_GS_ZDUMP_FBPGAT");
++            static const char *gc = std::getenv("PS2X_GS_ZDUMP_C");
 +            const bool gatilho = todos || (gm ? (m_ctx[ci].frame.fbmsk == static_cast<uint32_t>(std::strtoul(gm, nullptr, 16)) &&
 +                                        (!gp || m_ctx[ci].frame.psm == static_cast<uint8_t>(std::strtoul(gp, nullptr, 16))))
 +                                     : (m_prim.type == 6 && m_ctx[ci].frame.fbmsk == 0x00FFFFFFu && ((m_ctx[ci].alpha >> 4) & 3u) == 1u)) &&
 +                                 (!gt || m_ctx[ci].tex0.tbp0 == static_cast<uint32_t>(std::strtoul(gt, nullptr, 16))) &&
-+                                 (!std::getenv("PS2X_GS_ZDUMP_FBPGAT") || m_ctx[ci].frame.fbp == static_cast<uint32_t>(std::strtoul(std::getenv("PS2X_GS_ZDUMP_FBPGAT"), nullptr, 16))) &&
-+                                 (!std::getenv("PS2X_GS_ZDUMP_C") || ((m_ctx[ci].alpha >> 4) & 3u) == static_cast<uint32_t>(std::atoi(std::getenv("PS2X_GS_ZDUMP_C"))));
++                                 (!gfbp || m_ctx[ci].frame.fbp == static_cast<uint32_t>(std::strtoul(gfbp, nullptr, 16))) &&
++                                 (!gc || ((m_ctx[ci].alpha >> 4) & 3u) == static_cast<uint32_t>(std::atoi(gc)));
 +            if (zd && nv && !feito && drawing && gatilho && m_backend && otxDumpArmado() && ++contados >= gn)
 +            {
 +                feito = true;
@@ -15449,7 +15777,7 @@ index 9281d5f..ab25efd 100644
 +            }();
 +            static uint64_t contaNs = 0;
 +            static size_t proxNs = 0;
-+            const char *zdn = std::getenv("PS2X_GS_ZDUMP");
++            static const char *zdn = std::getenv("PS2X_GS_ZDUMP");
 +            if (drawing && proxNs < ns.size() && zdn && m_backend && otxDumpArmado() && ++contaNs >= ns[proxNs])
 +            {
 +                std::vector<uint8_t> vram;
@@ -15493,7 +15821,7 @@ index 9281d5f..ab25efd 100644
  
      PS2_IF_AGRESSIVE_LOGS({
          const uint32_t debugIndex = s_debugGsVertexKickCount.fetch_add(1, std::memory_order_relaxed);
-@@ -1573,11 +2203,70 @@ void GS::vertexKick(bool drawing)
+@@ -1573,11 +2209,70 @@ void GS::vertexKick(bool drawing)
      if (m_vtxCount < needed)
          return;
  
@@ -15567,7 +15895,7 @@ index 9281d5f..ab25efd 100644
          recordDrawDebugEventUnlocked(needed);
      }
  
-@@ -1636,10 +2325,10 @@ uint32_t GS::consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
+@@ -1636,10 +2331,10 @@ uint32_t GS::consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes)
  void GS::setRasterBackend(std::unique_ptr<GSRasterBackend> backend)
  {
      if (!backend)
@@ -15580,7 +15908,7 @@ index 9281d5f..ab25efd 100644
      if (m_backend)
      {
          m_backend->Flush();
-@@ -1704,15 +2393,55 @@ GSPrimitiveBatch GS::buildDrawBatch(int vertexCount) const
+@@ -1704,15 +2399,55 @@ GSPrimitiveBatch GS::buildDrawBatch(int vertexCount) const
  
  void GS::updatePreferredDisplaySourceForDraw(const GSPrimitiveBatch &batch)
  {
@@ -15642,10 +15970,10 @@ index 9281d5f..ab25efd 100644
      int x1 = static_cast<int>(v1.x) - (ctx.xyoffset.ofx >> 4);
 diff --git a/ps2xRuntime/src/lib/gs/gs_gpu.cpp b/ps2xRuntime/src/lib/gs/gs_gpu.cpp
 new file mode 100644
-index 0000000..1755e71
+index 0000000..c053aae
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/gs/gs_gpu.cpp
-@@ -0,0 +1,3316 @@
+@@ -0,0 +1,3320 @@
 +// Otavix (gs_gpu): ver include/runtime/gs/gs_gpu.h
 +#include "runtime/gs/gs_gpu.h"
 +#include "runtime/gs/ps2_gs_memory.h"
@@ -18123,7 +18451,11 @@ index 0000000..1755e71
 +            return false;
 +        // Otavix (03/11): quadro com páginas sobrepostas (desenho além da largura do buffer): na GPU a ordem entre os pixels
 +        // que caem na mesma memória é a do escalonamento; vai para a CPU, que desenha em ordem (névoa do God of War 1)
-+        if (otxQuadroSobreposto(ctx))
++        // Medido no God of War (03/11): na GPU a névoa sai igual (replay do GS dump, <0,1% dos pixels, só bordas da
++        // chuva), e mandar para a CPU custava ~10 descidas por quadro (gameplay de 60 para 45 fps). Só com
++        // PS2X_GS_GPU_SOBREPOSTO_CPU=1; na CPU esses quadros são desenhados em paralelo por página (gs_cpu_backend).
++        static const bool sobrepostoCpu = [] { const char *e = std::getenv("PS2X_GS_GPU_SOBREPOSTO_CPU"); return e && e[0] == '1'; }();
++        if (sobrepostoCpu && otxQuadroSobreposto(ctx))
 +            return false;
 +        // Otavix (31/10): retângulo da textura que o desenho lê (texels, com 1 de margem para o bilinear e o arredondamento);
 +        // fora da textura (repetição) ou q <= 0: a textura inteira
@@ -23713,7 +24045,7 @@ index a72105b..4a2e5dc 100644
      std::vector<PS2RomProfile> profiles;
      {
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 45cb9d2..cb8738c 100644
+index 45cb9d2..4790db5 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
 @@ -1,4 +1,10 @@
@@ -24122,7 +24454,7 @@ index 45cb9d2..cb8738c 100644
                                       cpuContext->vu0_vpu_stat =
                                           (cpuContext->vu0_vpu_stat & ~0x0600u) |
                                           (m_vu1.state().stoppedByD ? 0x0200u : 0u) |
-@@ -731,12 +1018,39 @@ bool PS2Runtime::initialize(const char *title)
+@@ -731,12 +1018,45 @@ bool PS2Runtime::initialize(const char *title)
  #if defined(PLATFORM_VITA)
          InitWindow(HOST_WINDOW_WIDTH, HOST_WINDOW_HEIGHT, title); // raylib vita does not support audio
  #else
@@ -24149,7 +24481,13 @@ index 45cb9d2..cb8738c 100644
 +            }
 +            InitWindow(jw, jh, title);
 +            // Otavix (02/11): PS2X_TELA_CHEIA=1 abre em tela cheia sem bordas (no jogo, F11 ou Alt+Enter alternam)
-+            if (const char *tc = std::getenv("PS2X_TELA_CHEIA"); tc && tc[0] == '1')
++            // Otavix (03/11): janela do tamanho do monitor ou maior (ex.: 3840x2160 num monitor 4K) também vai sem
++            // bordas: com a barra de título e a da tarefa, a janela sobrava para fora da tela
++            const char *tc = std::getenv("PS2X_TELA_CHEIA");
++            const char *janOculta = std::getenv("PS2X_JANELA");
++            const int mon = GetCurrentMonitor();
++            const bool grande = jw >= GetMonitorWidth(mon) || jh >= GetMonitorHeight(mon);
++            if ((tc && tc[0] == '1') || (grande && !(janOculta && *janOculta)))
 +                ToggleBorderlessWindowed();
 +        }
 +        if (const char *mudo = std::getenv("PS2X_MUDO"); !(mudo && *mudo == '1'))
@@ -24166,7 +24504,7 @@ index 45cb9d2..cb8738c 100644
          if (m_debugUiInitCallback)
          {
              m_debugUiInitCallback(*this, m_debugUiUserData);
-@@ -971,9 +1285,8 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+@@ -971,9 +1291,8 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
      }
      {
          std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
@@ -24178,7 +24516,7 @@ index 45cb9d2..cb8738c 100644
      }
  
      LoadedModule module;
-@@ -1009,6 +1322,29 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
+@@ -1009,6 +1328,29 @@ bool PS2Runtime::loadELF(const std::string &elfPath)
                                        elfCrc32,
                                        elfCrc32Valid);
  
@@ -24208,7 +24546,7 @@ index 45cb9d2..cb8738c 100644
      RUNTIME_LOG("ELF file loaded successfully. Entry point: 0x" << std::hex << m_cpuContext.pc << std::dec);
      return true;
  }
-@@ -1064,6 +1400,16 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+@@ -1064,6 +1406,16 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
          paths.cdRoot = paths.elfDirectory;
          paths.mcRoot = paths.elfDirectory / "mc0";
      }
@@ -24225,7 +24563,7 @@ index 45cb9d2..cb8738c 100644
  
      setIoPaths(paths);
  }
-@@ -1134,9 +1480,96 @@ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
+@@ -1134,9 +1486,96 @@ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
      }
  }
  
@@ -24322,7 +24660,7 @@ index 45cb9d2..cb8738c 100644
  
      uint32_t slot = 0u;
      if (generatedFunctionTableSlot(address, slot))
-@@ -1273,6 +1706,31 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
+@@ -1273,6 +1712,31 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
          readGuestU32Offset(a0Word0, 0x08u, vtableSlot8) &&
          readGuestU32Offset(a0Word0, 0x0cu, vtableSlotC);
  
@@ -24354,7 +24692,7 @@ index 45cb9d2..cb8738c 100644
      if (firstReport)
      {
          std::ostringstream oss;
-@@ -1356,14 +1814,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1356,14 +1820,15 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
      // Every inter-function transfer is also a deterministic EE safe point.
      // Backward edges inside generated functions use eeCheckpointDue(), while
      // this charge bounds straight-line call chains that have no local loop.
@@ -24372,7 +24710,7 @@ index 45cb9d2..cb8738c 100644
          {
              reportMissingFunction(rdram, ctx, targetPc, sourcePc, kind, debugName);
          }
-@@ -1396,15 +1855,37 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+@@ -1396,15 +1861,37 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
  
      RecompiledFunction targetFn = lookupFunction(targetPc);
      const uint32_t entryPc = ctx->pc;
@@ -24410,7 +24748,7 @@ index 45cb9d2..cb8738c 100644
          ctx->pc = fallthroughPc;
      }
  
-@@ -1423,7 +1904,16 @@ void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
+@@ -1423,7 +1910,16 @@ void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
                         exception == EXCEPTION_TLB_REFILL);
  }
  
@@ -24427,7 +24765,7 @@ index 45cb9d2..cb8738c 100644
  {
      (void)rdram;
  
-@@ -1442,7 +1932,7 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
+@@ -1442,7 +1938,7 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
      m_vu0.execute(vu0Code, PS2_VU0_CODE_SIZE,
                    vu0Data, PS2_VU0_DATA_SIZE,
                    m_gs, &m_memory,
@@ -24436,7 +24774,7 @@ index 45cb9d2..cb8738c 100644
      copyVu0StateToContext(m_vu0.state(), ctx);
  }
  
-@@ -1468,6 +1958,15 @@ void PS2Runtime::handleSyscall(uint8_t *rdram, R5900Context *ctx, uint32_t encod
+@@ -1468,6 +1964,15 @@ void PS2Runtime::handleSyscall(uint8_t *rdram, R5900Context *ctx, uint32_t encod
      const uint32_t syscallId = (encodedSyscallId != 0u)
                                     ? encodedSyscallId
                                     : getRegU32(ctx, 3); // $v1 / $3 is the EE kernel syscall number
@@ -24452,7 +24790,7 @@ index 45cb9d2..cb8738c 100644
  
      if (ps2_syscalls::dispatchNumericSyscall(syscallId, rdram, ctx, this))
      {
-@@ -1483,12 +1982,138 @@ void PS2Runtime::handleBreak(uint8_t *rdram, R5900Context *ctx)
+@@ -1483,12 +1988,138 @@ void PS2Runtime::handleBreak(uint8_t *rdram, R5900Context *ctx)
      raiseCop0Exception(ctx, EXCEPTION_BREAKPOINT);
  }
  
@@ -24591,7 +24929,7 @@ index 45cb9d2..cb8738c 100644
  }
  
  void PS2Runtime::handleTrap(uint8_t *rdram, R5900Context *ctx)
-@@ -1820,7 +2445,14 @@ uint32_t PS2Runtime::guestMalloc(uint32_t size, uint32_t alignment)
+@@ -1820,7 +2451,14 @@ uint32_t PS2Runtime::guestMalloc(uint32_t size, uint32_t alignment)
  {
      std::lock_guard<std::mutex> lock(m_guestHeapMutex);
      ensureGuestHeapInitializedLocked();
@@ -24607,7 +24945,7 @@ index 45cb9d2..cb8738c 100644
  }
  
  uint32_t PS2Runtime::guestCalloc(uint32_t count, uint32_t size, uint32_t alignment)
-@@ -2107,6 +2739,14 @@ void PS2Runtime::Store16(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint
+@@ -2107,6 +2745,14 @@ void PS2Runtime::Store16(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint
  void PS2Runtime::Store32(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint32_t value)
  {
      ps2TraceGuestWrite(rdram, vaddr, 4u, value, 0u, "WRITE32", ctx);
@@ -24622,7 +24960,7 @@ index 45cb9d2..cb8738c 100644
      try
      {
          m_memory.write32(vaddr, value);
-@@ -2165,6 +2805,7 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
+@@ -2165,6 +2811,7 @@ void PS2Runtime::kickGifDmaChainFromMMIO(uint8_t *rdram,
      ps2TraceGuestWrite(rdram, GIF_TADR, 4u, tadr, 0u, "WRITE32", ctx);
      m_memory.writeIORegister(GIF_TADR, tadr);
      ps2TraceGuestWrite(rdram, GIF_CHCR, 4u, chcr, 0u, "WRITE32", ctx);
@@ -24630,7 +24968,7 @@ index 45cb9d2..cb8738c 100644
      if (m_memory.tryProcessNativeGifImageUploadChain(m_gs, tadr, chcr))
      {
          drainCompletedDmacHandlers(rdram);
-@@ -2209,9 +2850,26 @@ void PS2Runtime::postEeEvent(EeEvent event)
+@@ -2209,9 +2856,26 @@ void PS2Runtime::postEeEvent(EeEvent event)
      m_eeScheduler->postEvent(event);
  }
  
@@ -24658,7 +24996,7 @@ index 45cb9d2..cb8738c 100644
  }
  
  [[noreturn]] void PS2Runtime::eeWaitVSyncTicks(uint32_t ticks, uint32_t resumePc)
-@@ -2339,6 +2997,91 @@ void PS2Runtime::HandleIntegerOverflow(R5900Context *ctx)
+@@ -2339,6 +3003,91 @@ void PS2Runtime::HandleIntegerOverflow(R5900Context *ctx)
      raiseCop0Exception(ctx, EXCEPTION_INTEGER_OVERFLOW);
  }
  
@@ -24750,7 +25088,7 @@ index 45cb9d2..cb8738c 100644
  void PS2Runtime::run()
  {
      m_stopRequested.store(false, std::memory_order_relaxed);
-@@ -2347,6 +3090,16 @@ void PS2Runtime::run()
+@@ -2347,6 +3096,16 @@ void PS2Runtime::run()
      ps2_stubs::resetAudioStubState();
      ps2_stubs::resetMpegStubState();
      initializeEeKernelState(m_memory.getRDRAM());
@@ -24767,7 +25105,7 @@ index 45cb9d2..cb8738c 100644
      m_cpuContext.r[4] = _mm_setzero_si128();
      m_cpuContext.r[5] = _mm_setzero_si128();
      m_cpuContext.r[29] = _mm_set_epi64x(0, static_cast<int64_t>(PS2_RAM_SIZE - 0x10u));
-@@ -2369,8 +3122,13 @@ void PS2Runtime::run()
+@@ -2369,8 +3128,13 @@ void PS2Runtime::run()
          ThreadNaming::SetCurrentThreadName("GameThread");
          try
          {
@@ -24781,7 +25119,7 @@ index 45cb9d2..cb8738c 100644
              uint32_t pc = m_debugPc.load(std::memory_order_relaxed);
              RUNTIME_LOG("Game thread returned. PC=0x" << std::hex << pc
                        << " RA=0x" << static_cast<uint32_t>(_mm_extract_epi32(m_cpuContext.r[31], 0)) << std::dec << std::endl);
-@@ -2386,11 +3144,42 @@ void PS2Runtime::run()
+@@ -2386,11 +3150,42 @@ void PS2Runtime::run()
          gameThreadFinished.store(true, std::memory_order_release); });
  
      uint64_t tick = 0;
@@ -24826,7 +25164,7 @@ index 45cb9d2..cb8738c 100644
              {
                  uint64_t curDma = m_memory.dmaStartCount();
                  uint64_t curGif = m_memory.gifCopyCount();
-@@ -2403,7 +3192,71 @@ void PS2Runtime::run()
+@@ -2403,7 +3198,71 @@ void PS2Runtime::run()
                  const uint32_t dbgGp = m_debugGp.load(std::memory_order_relaxed);
                  const auto eeSnapshot = m_eeScheduler->snapshot();
  
@@ -24899,7 +25237,7 @@ index 45cb9d2..cb8738c 100644
                                                 << " pc=0x" << std::hex << dbgPc
                                                 << " ra=0x" << dbgRa
                                                 << " sp=0x" << dbgSp
-@@ -2416,35 +3269,174 @@ void PS2Runtime::run()
+@@ -2416,35 +3275,179 @@ void PS2Runtime::run()
                                                 << " gif=" << curGif
                                                 << " gsw=" << curGs
                                                 << " vif=" << curVif
@@ -24984,6 +25322,11 @@ index 45cb9d2..cb8738c 100644
 +        // Otavix (02/11): F11 ou Alt+Enter alternam a tela cheia sem bordas
 +        if (IsKeyPressed(KEY_F11) || ((IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) && IsKeyPressed(KEY_ENTER)))
 +            ToggleBorderlessWindowed();
++        // Otavix (03/11): sem o ponteiro do mouse sobre o jogo enquanto a janela está em foco
++        if (IsWindowFocused() && !IsCursorHidden())
++            HideCursor();
++        else if (!IsWindowFocused() && IsCursorHidden())
++            ShowCursor();
 +
          BeginDrawing();
          ClearBackground(BLACK);

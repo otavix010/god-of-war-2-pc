@@ -3,6 +3,23 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 03/11/2026 · 0.1.3
+### pt
+- **Desempenho de volta**: a 0.1.2 deixava o jogo lento (menu a 20 fps e gameplay caindo para 30). Agora roda a 60 fps no menu e no gameplay.
+- **Cutscenes sem travar nem cortar**: o vídeo chegava ao decodificador em dobro e misturado, o que travava a imagem e encerrava algumas cenas antes da hora.
+- Atualizar o port pelo launcher não falha mais ("already exists in working directory"); o gerador também funciona em discos exFAT/FAT e baixa de novo o Git portátil se ele estiver danificado ou bloqueado.
+- O ponteiro do mouse some sobre o jogo; com a janela do tamanho do monitor (ex.: 3840 × 2160 numa tela 4K), o jogo abre sem bordas em vez de sobrar para fora da tela.
+### en
+- **Performance is back**: 0.1.2 made the game slow (menu at 20 fps and gameplay dropping to 30). It now runs at 60 fps in the menu and in gameplay.
+- **Cutscenes no longer freeze or cut short**: the video reached the decoder twice and interleaved, which froze the picture and ended some scenes early.
+- Updating the port from the launcher no longer fails ("already exists in working directory"); the generator also works on exFAT/FAT drives and downloads the portable Git again if it is damaged or blocked.
+- The mouse pointer hides over the game; with the window set to the monitor's size (e.g. 3840 × 2160 on a 4K screen), the game opens borderless instead of spilling off the screen.
+### es
+- **Vuelve el rendimiento**: la 0.1.2 dejaba el juego lento (menú a 20 fps y gameplay cayendo a 30). Ahora va a 60 fps en el menú y en el gameplay.
+- **Cinemáticas sin congelarse ni cortarse**: el vídeo llegaba al decodificador duplicado y mezclado, lo que congelaba la imagen y terminaba algunas escenas antes de tiempo.
+- Actualizar el port desde el launcher ya no falla ("already exists in working directory"); el generador también funciona en discos exFAT/FAT y vuelve a descargar el Git portátil si está dañado o bloqueado.
+- El puntero del ratón se oculta sobre el juego; con la ventana del tamaño del monitor (p. ej. 3840 × 2160 en una pantalla 4K), el juego se abre sin bordes en lugar de salirse de la pantalla.
+
 ## 03/11/2026 · 0.1.2
 ### pt
 - **Vídeos completos e com som**: as cutscenes em vídeo não são mais puladas e o som delas é tocado pelo próprio port.

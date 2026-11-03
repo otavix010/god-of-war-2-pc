@@ -106,12 +106,31 @@ function Achar-VS {
     if ($p) { return ($p | Select-Object -First 1) }
     return $null
 }
+# o git só vale se rodar (um MinGit incompleto ou barrado pelo antivírus sai com 0xC0000135): o portátil quebrado é
+# apagado para a etapa 1 baixar de novo
+function Git-Roda([string]$exe) {
+    try { $o = & $exe --version 2>$null; return ($LASTEXITCODE -eq 0 -and "$o" -match 'git version') } catch { return $false }
+}
 function Achar-Git {
     $g = Get-Command git.exe -ErrorAction SilentlyContinue
-    if ($g) { return $g.Source }
+    if ($g -and (Git-Roda $g.Source)) { return $g.Source }
     $m = Join-Path $R 'dl\mingit\cmd\git.exe'
-    if (Test-Path -LiteralPath $m) { return $m }
+    if (Test-Path -LiteralPath $m) {
+        if (Git-Roda $m) { return $m }
+        Remove-Item -LiteralPath (Join-Path $R 'dl\mingit') -Recurse -Force -ErrorAction SilentlyContinue
+    }
     return $null
+}
+function Baixa-MinGit {
+    Msg "baixando o Git portátil (MinGit) de $MINGIT_URL"
+    $zip = Join-Path $R 'dl\mingit.zip'
+    New-Item -ItemType Directory -Force (Join-Path $R 'dl') | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri $MINGIT_URL -OutFile $zip -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\mingit') -Force
+    Remove-Item $zip
+    if (-not (Achar-Git)) { throw 'o Git portátil não roda (dl\mingit\cmd\git.exe). Se o antivírus bloqueou, libere a pasta do port e gere de novo.' }
 }
 Etapa '1_ferramentas' {
     $falta = @()
@@ -125,21 +144,12 @@ Etapa '1_ferramentas' {
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --includeRecommended`""
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
-    if (-not (Achar-Git)) {
-        Msg "baixando o Git portátil (MinGit) de $MINGIT_URL"
-        $zip = Join-Path $R 'dl\mingit.zip'
-        New-Item -ItemType Directory -Force (Join-Path $R 'dl') | Out-Null
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $MINGIT_URL -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\mingit') -Force
-        Remove-Item $zip
-        if (-not (Achar-Git)) { throw 'o Git portátil não ficou em dl\mingit' }
-    }
+    if (-not (Achar-Git)) { Baixa-MinGit }
 }
 $VS = Achar-VS
 if (-not $VS) { throw 'Visual Studio Build Tools com C++ e CMake não encontrado (rode de novo a etapa 1: -RefazerDe 1)' }
 $GIT = Achar-Git
+if (-not $GIT) { Baixa-MinGit; $GIT = Achar-Git } # o portátil sumiu ou quebrou depois da etapa 1
 # o CMake baixa as dependências do PS2Recomp com o git: o portátil precisa estar no PATH
 $env:PATH = (Split-Path $GIT) + ';' + $env:PATH
 # o vcvars64.bat procura o vswhere.exe no PATH
@@ -206,14 +216,14 @@ Etapa '3_ps2recomp' {
     } else {
         if (Test-Path -LiteralPath $P) { Remove-Item -LiteralPath $P -Recurse -Force }
         Msg "baixando o PS2Recomp ($PS2RECOMP_URL)"
-        Exec $LOG "`"$GIT`" clone --quiet $PS2RECOMP_URL `"$P`""
+        Exec $LOG "`"$GIT`" -c safe.directory=* clone --quiet $PS2RECOMP_URL `"$P`""
     }
     # --force descarta as correções antigas: elas são aplicadas de novo logo abaixo
-    Exec $LOG "`"$GIT`" -C `"$P`" -c advice.detachedHead=false checkout --force --quiet $PS2RECOMP_SHA"
-    Exec $LOG "`"$GIT`" -C `"$P`" clean -fdq ps2xRuntime"
+    Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" -c advice.detachedHead=false checkout --force --quiet $PS2RECOMP_SHA"
+    Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" clean -fdq ps2xRuntime ps2xIOP"
     foreach ($pt in Get-ChildItem (Join-Path $R 'patches') -Filter '*.patch' | Sort-Object Name) {
         Msg "aplicando patches\$($pt.Name)"
-        Exec $LOG "`"$GIT`" -C `"$P`" apply --whitespace=nowarn `"$($pt.FullName)`""
+        Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" apply --whitespace=nowarn `"$($pt.FullName)`""
     }
     Msg 'compilando o tradutor (ps2_recomp)'
     $b = Join-Path $P 'out\ferramentas'
