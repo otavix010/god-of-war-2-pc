@@ -159,6 +159,9 @@ $VCVARS = Join-Path $VS 'VC\Auxiliary\Build\vcvars64.bat'
 $TMPC = Join-Path $R 'out\tmp'
 New-Item -ItemType Directory -Force $TMPC | Out-Null
 function ComVS([string]$linha) { "call `"$VCVARS`" >nul && set `"TEMP=$TMPC`" && set `"TMP=$TMPC`" && $linha" }
+# sem o Windows SDK o CMake falha em "Detecting C compiler ABI" (RC Pass 1 failed, CMAKE_MT-NOTFOUND): avisa antes
+cmd /c (ComVS 'where rc.exe mt.exe') *> $null
+if ($LASTEXITCODE -ne 0) { throw 'falta o Windows SDK (rc.exe/mt.exe) no Visual Studio Build Tools. Abra o Visual Studio Installer > Modificar > marque "SDK do Windows 11" (ou 10) e gere de novo.' }
 
 # ---------------------------------------------------------------------------- disco
 function Escolher-Iso([string]$texto) {
@@ -177,6 +180,7 @@ Etapa '2_disco' {
         $Iso = Escolher-Iso "Escolha a ISO do $($JOGO.nome) ($($JOGO.versao))"
         if (-not $Iso) { throw 'sem a ISO do jogo' }
     }
+    if (Test-Path -LiteralPath $Iso -PathType Container) { throw "$Iso é uma pasta, não a ISO: escolha o arquivo .iso do jogo (imagem do DVD original, $($JOGO.serial); cópias ripadas/dubladas em pasta não servem)" }
     if (-not (Test-Path -LiteralPath $Iso -PathType Leaf)) { throw "a ISO não existe: $Iso (escolha o arquivo .iso de novo)" }
     $Iso = (Resolve-Path -LiteralPath $Iso).Path
     $tam = (Get-Item -LiteralPath $Iso).Length
@@ -188,7 +192,7 @@ Etapa '2_disco' {
         Msg "AVISO: a ISO não é a cópia testada (SHA-1 $h). Vou conferir o executável do jogo."
     }
     Msg 'extraindo os arquivos do disco para trabalho\disc'
-    Exec $LOG "python -I `"$R\ferramentas\extrai_iso.py`" `"$Iso`" `"$T\disc`""
+    Exec $LOG "python -I `"$R\ferramentas\extrai_iso.py`" `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
     if (-not (Test-Path -LiteralPath $ELF)) {
         # diz de que jogo a ISO é (o SYSTEM.CNF aponta o executável, cujo nome é o serial): ISO do jogo errado é o caso comum
         $cnf = Join-Path $T 'disc\SYSTEM.CNF'
@@ -227,7 +231,7 @@ Etapa '3_ps2recomp' {
     }
     Msg 'compilando o tradutor (ps2_recomp)'
     $b = Join-Path $P 'out\ferramentas'
-    Exec $LOG (ComVS "cmake -S `"$P`" -B `"$b`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_BUILD_ANALYZER=OFF")
+    Exec $LOG (ComVS "cmake -S `"$P`" -B `"$b`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS2X_AVX2=OFF -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_BUILD_ANALYZER=OFF")
     Exec $LOG (ComVS "cmake --build `"$b`" --target ps2_recomp")
 }
 $RECOMP = Get-ChildItem (Join-Path $P 'out\ferramentas') -Recurse -Filter 'ps2_recomp.exe' -ErrorAction SilentlyContinue | Select-Object -First 1

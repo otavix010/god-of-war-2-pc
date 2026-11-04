@@ -58,6 +58,11 @@ def elfs_embutidos(caminho):
 
 
 def main():
+    # Otavix (04/11): saída redirecionada no Windows é cp1252 e quebrava no '→' (etapa 4 falhava)
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
     pasta, elf = sys.argv[1], sys.argv[2]
     embutidos = elfs_embutidos(os.path.join(pasta, elf))
     dentro_embutido = lambda a: any(x <= a < y for x, y in embutidos)
