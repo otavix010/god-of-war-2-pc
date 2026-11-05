@@ -215,10 +215,19 @@ Etapa '2_disco' {
 # ---------------------------------------------------------------------------- PS2Recomp
 $P = Join-Path $R 'ps2recomp'
 Etapa '3_ps2recomp' {
+    # pasta com .git quebrado (clone interrompido, cópia por zip) ou sem o commit fixo: apaga e baixa de novo
+    $ok = $false
     if (Test-Path -LiteralPath (Join-Path $P '.git')) {
+        $topo = SemExcecao { & $GIT -c safe.directory=* -C $P rev-parse --show-toplevel 2>$null }
+        if ($LASTEXITCODE -eq 0 -and $topo -and ((Resolve-Path -LiteralPath $topo).Path.TrimEnd('\') -eq (Resolve-Path -LiteralPath $P).Path.TrimEnd('\'))) {
+            SemExcecao { & $GIT -c safe.directory=* -C $P cat-file -e "$PS2RECOMP_SHA^{commit}" 2>$null }
+            $ok = ($LASTEXITCODE -eq 0)
+        }
+    }
+    if ($ok) {
         Msg 'PS2Recomp já baixado'
     } else {
-        if (Test-Path -LiteralPath $P) { Remove-Item -LiteralPath $P -Recurse -Force }
+        if (Test-Path -LiteralPath $P) { Msg 'PS2Recomp incompleto: baixando de novo'; Remove-Item -LiteralPath $P -Recurse -Force }
         Msg "baixando o PS2Recomp ($PS2RECOMP_URL)"
         Exec $LOG "`"$GIT`" -c safe.directory=* clone --quiet $PS2RECOMP_URL `"$P`""
     }
