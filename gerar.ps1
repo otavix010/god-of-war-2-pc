@@ -1,11 +1,14 @@
 ﻿<#
 .SYNOPSIS
   Gera e compila o port a partir da SUA cópia do jogo (imagem .iso do DVD de PS2).
+  As ferramentas vêm no motor (bin\otx_ferramentas.exe): extração da ISO, mapa HLE, CSV, tabela de funções, VU1
+  e o lançador do clang-cl no build. Não precisa de Python nem de Git. Como a extração usa o exe do motor, o motor
+  (etapa 3) é baixado antes da extração (etapa 2); a ISO é escolhida antes dos dois.
 
 .DESCRIPTION
   Faz tudo em ordem, e cada etapa pula se já foi feita (use -Refazer para refazer tudo,
   ou -RefazerDe N para refazer da etapa N em diante):
-    1. confere as ferramentas (Visual Studio Build Tools com C++ e CMake, Python);
+    1. confere as ferramentas (Visual Studio Build Tools com C++ e CMake);
     2. confere a sua ISO e extrai os arquivos do disco para trabalho\disc;
     3. baixa o motor do port (pacote pronto do motor PS2 Otavix, conferido pelo SHA-256);
     4. traduz o código do jogo (MIPS R5900 -> C++);
@@ -45,12 +48,12 @@ if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R
 $JOGO = Get-Content -Raw -Encoding UTF8 (Join-Path $R 'jogo\jogo.json') | ConvertFrom-Json
 
 # motor do port: pacote fechado (tradutor, bibliotecas do runtime, cabeçalhos e o build do jogo), um por versão
-$MOTOR_VERSAO = '0.1.0'
+$MOTOR_VERSAO = '0.1.1'
 $MOTOR_NOME = "otx-motor-ps2-$MOTOR_VERSAO"
 $MOTOR_URL = "https://github.com/otavix010/otx-motor-ps2/releases/download/v$MOTOR_VERSAO/$MOTOR_NOME.zip"
 # cópia no servidor do launcher (o mesmo arquivo; vem primeiro, o GitHub fica de reserva)
 $MOTOR_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/motor/ps2/$MOTOR_NOME.zip"
-$MOTOR_SHA256 = 'b49e931bfe9f1306c710e9555dd7217ae237c4755c621d700c1385686d888c22'
+$MOTOR_SHA256 = '7ad454b7c0b965e7270c865d2ed60222eec0d915e47ed555412af70db509ba4e'
 
 $T = Join-Path $R 'trabalho'
 $OUT = Join-Path $R 'out\gerar'
@@ -132,18 +135,13 @@ function Achar-VS {
 }
 Etapa '1_ferramentas' {
     $falta = @()
-    # "python" pode ser o atalho da Microsoft Store (abre a loja, não roda nada)
-    $v = ''
-    try { $v = (cmd /c 'python -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>nul') } catch { }
-    if (-not ($v -match '^\d+$')) { $falta += 'Python 3.11 ou mais novo (winget install Python.Python.3.12) -- e feche/abra o terminal depois' }
-    elseif ([int]$v -lt 311) { $falta += 'Python 3.11 ou mais novo (winget install Python.Python.3.12)' }
     $vs = Achar-VS
     if (-not $vs) {
         $falta += 'Visual Studio 2022 Build Tools com C++ e "C++ CMake tools":' +
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --includeRecommended`""
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
-    Anotar $LOG "Python $v; Visual Studio em $vs"
+    Anotar $LOG "Visual Studio em $vs"
     # opcional: com o clang-cl do Visual Studio a geometria (VU1) compila com ele e roda um pouco mais rápido
     if (Test-Path (Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe')) { Anotar $LOG 'clang-cl: sim' }
     else { Msg 'sem o "C++ Clang tools" do Visual Studio: a geometria compila com o MSVC (funciona igual, um pouco mais lenta)' }
@@ -173,41 +171,11 @@ function Escolher-Iso([string]$texto) {
     } catch { return (Read-Host $texto) }
 }
 $ELF = Join-Path $T ('disc\' + $JOGO.elf)
-Etapa '2_disco' {
-    if (-not $Iso) {
-        $Iso = Escolher-Iso "Escolha a ISO do $($JOGO.nome) ($($JOGO.versao))"
-        if (-not $Iso) { throw 'sem a ISO do jogo' }
-    }
-    if (Test-Path -LiteralPath $Iso -PathType Container) { throw "$Iso é uma pasta, não a ISO: escolha o arquivo .iso do jogo (imagem do DVD original, $($JOGO.serial); cópias ripadas/dubladas em pasta não servem)" }
-    if (-not (Test-Path -LiteralPath $Iso -PathType Leaf)) { throw "a ISO não existe: $Iso (escolha o arquivo .iso de novo)" }
-    $Iso = (Resolve-Path -LiteralPath $Iso).Path
-    $tam = (Get-Item -LiteralPath $Iso).Length
-    if ($tam -lt 100MB) { throw "a ISO tem só $([math]::Round($tam / 1MB, 1)) MB: arquivo incompleto ou não é a ISO do jogo (escolha o arquivo .iso de novo)" }
-    Msg "conferindo a ISO ($([math]::Round($tam / 1GB, 2)) GB)"
-    $h = Sha1 $Iso
-    Anotar $LOG "SHA-1 da ISO: $h"
-    if ($JOGO.iso_sha1 -notcontains $h) {
-        Msg "AVISO: a ISO não é a cópia testada (SHA-1 $h). Vou conferir o executável do jogo."
-    }
-    Msg 'extraindo os arquivos do disco para trabalho\disc'
-    Exec $LOG "python -I `"$R\ferramentas\extrai_iso.py`" `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
-    if (-not (Test-Path -LiteralPath $ELF)) {
-        # diz de que jogo a ISO é (o SYSTEM.CNF aponta o executável, cujo nome é o serial): ISO do jogo errado é o caso comum
-        $cnf = Join-Path $T 'disc\SYSTEM.CNF'
-        $qual = ''
-        if ((Test-Path -LiteralPath $cnf) -and ((Get-Content -Raw -LiteralPath $cnf) -match 'BOOT2\s*=\s*cdrom0?:\\?([^;\r\n]+)')) {
-            $serial = [IO.Path]::GetFileName($Matches[1].Trim()) -replace '_', '-' -replace '\.', ''
-            $qual = " Essa ISO é de outro jogo ou versão (serial $serial)."
-        }
-        throw "o executável $($JOGO.elf) não está nessa ISO.$qual Escolha a ISO do $($JOGO.nome), versão $($JOGO.versao)."
-    }
-    $he = Sha1 $ELF
-    if ($JOGO.elf_sha1 -notcontains $he) {
-        throw "o executável do jogo não é o da versão suportada ($($JOGO.versao), $($JOGO.serial)). SHA-1 dele: $he"
-    }
-    # o jogo lê setores direto do disco: o jogar.cmd entrega a ISO ao runtime
-    # UTF-8 sem BOM: o jogar.cmd lê com chcp 65001 (um BOM viraria parte do caminho)
-    [IO.File]::WriteAllText((Join-Path $T 'iso.txt'), $Iso, (New-Object Text.UTF8Encoding $false))
+# a extração (etapa 2) usa o otx_ferramentas.exe, que vem no motor: o motor (etapa 3) é baixado antes dela. A ISO é
+# escolhida já aqui, antes do download (ninguém espera o motor baixar para ver a janela da ISO).
+if (-not $Iso -and ($Refazer -or -not (Test-Path (Join-Path $OUT '2_disco.ok')))) {
+    $Iso = Escolher-Iso "Escolha a ISO do $($JOGO.nome) ($($JOGO.versao))"
+    if (-not $Iso) { throw 'sem a ISO do jogo' }
 }
 
 # ---------------------------------------------------------------------------- motor
@@ -309,7 +277,7 @@ Etapa '3_motor' {
     try { Expand-Archive -LiteralPath $zip -DestinationPath $abre -Force }
     catch { throw "o motor baixou inteiro (conferido), mas não foi extraído: $($_.Exception.Message). Confira o espaço livre no disco e se o antivírus não está bloqueando a pasta do jogo, e gere de novo." }
     $dentro = Join-Path $abre $MOTOR_NOME
-    foreach ($a in 'VERSAO.txt', 'bin\otx_tradutor.exe', 'cmake\CMakeLists.txt', 'ferramentas\mapa_hle_proprio.py', 'ferramentas\tabela_propria.py', 'ferramentas\limpa_csv.py',
+    foreach ($a in 'VERSAO.txt', 'bin\otx_tradutor.exe', 'bin\otx_ferramentas.exe', 'cmake\CMakeLists.txt', 'ferramentas\hle_fora.txt',
                    'include\ps2xRuntime\ps2_call_list.h', 'lib\avx2\ps2_runtime.lib', 'lib\sse4\ps2_runtime.lib') {
         if (-not (Test-Path -LiteralPath (Join-Path $dentro $a))) { throw "o pacote do motor está incompleto (falta $a)" }
     }
@@ -321,6 +289,46 @@ Etapa '3_motor' {
     Anotar $LOG (Get-Content (Join-Path $PAC 'VERSAO.txt') -TotalCount 1 -Encoding UTF8)
 }
 if (-not (Test-Path -LiteralPath (Join-Path $PAC 'bin\otx_tradutor.exe'))) { throw "o motor não está em $PAC (rode -RefazerDe 3)" }
+# ferramentas (as dos .py num executável só: extração da ISO, mapa HLE, CSV, tabela de funções, VU1, lançador do clang-cl)
+$FERR = Join-Path $PAC 'bin\otx_ferramentas.exe'
+if (-not (Test-Path -LiteralPath $FERR)) { throw "o motor em $PAC não tem bin\otx_ferramentas.exe (pacote anterior a ele): use o gerar.ps1 ou um motor mais novo (-RefazerDe 3)" }
+# exe de um motor anterior à extração da ISO e ao lançador (sem os subcomandos extrai_iso e lanca)
+$usoFerr = SemExcecao { & $FERR 2>&1 | Out-String }
+if ($usoFerr -notmatch 'extrai_iso' -or $usoFerr -notmatch '\blanca\b') { throw "o bin\otx_ferramentas.exe do motor em $PAC é de uma versão antiga: gere de novo a partir do motor (-RefazerDe 3)" }
+
+# ---------------------------------------------------------------------------- disco (extração)
+Etapa '2_disco' {
+    if (Test-Path -LiteralPath $Iso -PathType Container) { throw "$Iso é uma pasta, não a ISO: escolha o arquivo .iso do jogo (imagem do DVD original, $($JOGO.serial); cópias ripadas/dubladas em pasta não servem)" }
+    if (-not (Test-Path -LiteralPath $Iso -PathType Leaf)) { throw "a ISO não existe: $Iso (escolha o arquivo .iso de novo)" }
+    $Iso = (Resolve-Path -LiteralPath $Iso).Path
+    $tam = (Get-Item -LiteralPath $Iso).Length
+    if ($tam -lt 100MB) { throw "a ISO tem só $([math]::Round($tam / 1MB, 1)) MB: arquivo incompleto ou não é a ISO do jogo (escolha o arquivo .iso de novo)" }
+    Msg "conferindo a ISO ($([math]::Round($tam / 1GB, 2)) GB)"
+    $h = Sha1 $Iso
+    Anotar $LOG "SHA-1 da ISO: $h"
+    if ($JOGO.iso_sha1 -notcontains $h) {
+        Msg "AVISO: a ISO não é a cópia testada (SHA-1 $h). Vou conferir o executável do jogo."
+    }
+    Msg 'extraindo os arquivos do disco para trabalho\disc'
+    Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
+    if (-not (Test-Path -LiteralPath $ELF)) {
+        # diz de que jogo a ISO é (o SYSTEM.CNF aponta o executável, cujo nome é o serial): ISO do jogo errado é o caso comum
+        $cnf = Join-Path $T 'disc\SYSTEM.CNF'
+        $qual = ''
+        if ((Test-Path -LiteralPath $cnf) -and ((Get-Content -Raw -LiteralPath $cnf) -match 'BOOT2\s*=\s*cdrom0?:\\?([^;\r\n]+)')) {
+            $serial = [IO.Path]::GetFileName($Matches[1].Trim()) -replace '_', '-' -replace '\.', ''
+            $qual = " Essa ISO é de outro jogo ou versão (serial $serial)."
+        }
+        throw "o executável $($JOGO.elf) não está nessa ISO.$qual Escolha a ISO do $($JOGO.nome), versão $($JOGO.versao)."
+    }
+    $he = Sha1 $ELF
+    if ($JOGO.elf_sha1 -notcontains $he) {
+        throw "o executável do jogo não é o da versão suportada ($($JOGO.versao), $($JOGO.serial)). SHA-1 dele: $he"
+    }
+    # o jogo lê setores direto do disco: o jogar.cmd entrega a ISO ao runtime
+    # UTF-8 sem BOM: o jogar.cmd lê com chcp 65001 (um BOM viraria parte do caminho)
+    [IO.File]::WriteAllText((Join-Path $T 'iso.txt'), $Iso, (New-Object Text.UTF8Encoding $false))
+}
 
 # ---------------------------------------------------------------------------- tradução
 # remendos.txt do jogo ("<endereço hex> <instrução hex>  # comentário"): instruções trocadas só no código traduzido,
@@ -364,7 +372,7 @@ Etapa '4_traduzir' {
         Anotar $LOG "$n remendos de instrução (jogo\remendos.txt)"
     }
     Msg 'mapa das funções do sistema (HLE)'
-    Exec $LOG "python -I `"$PAC\ferramentas\mapa_hle_proprio.py`" `"$R\jogo`" `"$HLE`" --elf `"$ELF`" --lista `"$PAC\include\ps2xRuntime\ps2_call_list.h`" --fora `"$PAC\ferramentas\hle_fora.txt`""
+    Exec $LOG "`"$FERR`" mapa_hle_proprio `"$R\jogo`" `"$HLE`" --elf `"$ELF`" --lista `"$PAC\include\ps2xRuntime\ps2_call_list.h`" --fora `"$PAC\ferramentas\hle_fora.txt`""
     $g = Join-Path $T 'gerado'
     if (Test-Path -LiteralPath $g) { Remove-Item -LiteralPath $g -Recurse -Force }
     New-Item -ItemType Directory -Force $g | Out-Null
@@ -373,7 +381,7 @@ Etapa '4_traduzir' {
     Msg 'traduzindo o código do jogo (alguns minutos)'
     # fins inflados do CSV do Ghidra corrigidos pelo tamanho (senão uma função engole megabytes de código)
     $csvT = Join-Path $T 'funcoes.csv'
-    Exec $LOG "python -I `"$PAC\ferramentas\limpa_csv.py`" `"$R\jogo\ghidra_funcoes.csv`" `"$csvT`""
+    Exec $LOG "`"$FERR`" limpa_csv `"$R\jogo\ghidra_funcoes.csv`" `"$csvT`""
     Exec $LOG "`"$PAC\bin\otx_tradutor.exe`" `"$elfT`" `"$csvT`" `"$extras`" `"$g`" 400 --hle `"$HLE`""
     Copy-Item (Join-Path $g '*') $RUNNER -Force
     Copy-Item (Join-Path $PAC 'include\abi\*.h') $RUNNER -Force
@@ -382,7 +390,7 @@ Etapa '4_traduzir' {
     $txt = [IO.File]::ReadAllText($jh)
     [IO.File]::WriteAllText($jh, $txt.Replace('#include "otx_abi.h"', "#define OTX_ABI_RUNTIME_ATUAL`n#include `"otx_abi.h`""))
     Msg 'tabela de funções'
-    Exec $LOG "python -I `"$PAC\ferramentas\tabela_propria.py`" `"$RUNNER\otx_jogo_tabela.cpp`" `"$RUNNER\register_functions.cpp`" `"$R\jogo`" --elf `"$ELF`" --hle `"$HLE`""
+    Exec $LOG "`"$FERR`" tabela_propria `"$RUNNER\otx_jogo_tabela.cpp`" `"$RUNNER\register_functions.cpp`" `"$R\jogo`" --elf `"$ELF`" --hle `"$HLE`""
     Remove-Item (Join-Path $RUNNER 'otx_jogo_tabela.cpp') -Force
     Remove-Item -LiteralPath $g -Recurse -Force
     Anotar $LOG "$((Get-ChildItem $RUNNER -File).Count) arquivos em codigo\src\runner"
@@ -390,8 +398,8 @@ Etapa '4_traduzir' {
 
 # ---------------------------------------------------------------------------- VU1 (geometria)
 # Os microprogramas do VU1 ficam dentro do executável do jogo. A receita (jogo\vu1_receita.json) só diz onde
-# (offsets e tamanhos) e como montar a memória de código; o extrai_vu1.py monta a partir do SEU executável
-# (confere o SHA-1) e o vu1_tradutor.py gera o C++. Sem receita ou se algo falhar, o VU1 fica no interpretador:
+# (offsets e tamanhos) e como montar a memória de código; o otx_ferramentas extrai_vu1 monta a partir do SEU
+# executável (confere o SHA-1) e o otx_ferramentas vu1_tradutor gera o C++. Sem receita ou se algo falhar, o VU1 fica no interpretador:
 # o jogo roda igual, só que bem mais devagar.
 Etapa '5_vu1' {
     $vu = Join-Path $C 'src\vu'
@@ -403,7 +411,7 @@ Etapa '5_vu1' {
     $ok = $false
     if (Test-Path -LiteralPath $rec) {
         try {
-            Exec $LOG "python -I `"$R\ferramentas\extrai_vu1.py`" extrai `"$rec`" `"$ELF`" `"$dv`""
+            Exec $LOG "`"$FERR`" extrai_vu1 extrai `"$rec`" `"$ELF`" `"$dv`""
             $ok = $true
         } catch {
             Msg "AVISO: não deu para montar o VU1 nativo; a geometria fica no interpretador (mais lento). $($_.Exception.Message)"
@@ -417,7 +425,7 @@ Etapa '5_vu1' {
     # programas mais executados: as operações de ponto flutuante em linha (compila mais devagar, roda mais rápido)
     if ($JOGO.vu1_quentes) { $env:PS2X_VU1_QUENTES = ($JOGO.vu1_quentes -join ',') }
     Msg 'traduzindo os microprogramas do VU1'
-    Exec $LOG "python -I `"$R\ferramentas\vu1_tradutor.py`" `"$vu\vu1_programas.cpp`" `"$dv`" --extras `"$dv\extras.txt`""
+    Exec $LOG "`"$FERR`" vu1_tradutor `"$vu\vu1_programas.cpp`" `"$dv`" --extras `"$dv\extras.txt`""
 }
 
 # ---------------------------------------------------------------------------- compilar
@@ -435,8 +443,8 @@ if (-not $Jobs) {
 $BJ = Join-Path $C 'out\jogo'
 Etapa '6_compilar' {
     # os microprogramas do VU1 compilam com o clang-cl do Visual Studio se ele estiver instalado (mais rápido);
-    # sem ele, com o próprio MSVC
-    $lancador = (Join-Path $R 'ferramentas\otx_lanca.py').Replace('\', '/')
+    # sem ele, com o próprio MSVC. O lançador é o otx_ferramentas.exe do motor (subcomando lanca; sem Python)
+    $lancador = $FERR.Replace('\', '/')
     $pac = $PAC.Replace('\', '/')
     Msg "compilando o jogo ($Jobs compilações em paralelo, motor $VARIANTE; de 5 a 30 min)"
     $cfg = "`"-DOTX_PACOTE=$pac`" -DOTX_VARIANTE=$VARIANTE `"-DPS2X_VU1_LANCADOR=$lancador`""

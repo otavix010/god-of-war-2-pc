@@ -6,12 +6,15 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 ## 06/11/2026 · 0.1.4
 ### pt
 - **Motor próprio**: o gerador não baixa nem compila mais o PS2Recomp. Agora baixa o motor do port pronto (conferido pelo SHA-256) e compila só o código do jogo: mais rápido (de 5 a 30 minutos, conforme o PC), usa menos memória e não precisa de Git.
+- **Sem Python**: as ferramentas do gerador agora vêm dentro do motor (um executável só). Basta instalar o Visual Studio Build Tools; Python e Git não são mais necessários.
 - Quem já tinha o port gerado: a próxima geração apaga a pasta `ps2recomp\` antiga e refaz da etapa 3 sozinha.
 ### en
 - **Own engine**: the generator no longer downloads or builds PS2Recomp. It now downloads the prebuilt port engine (checked by SHA-256) and builds only the game code: faster (5 to 30 minutes, depending on the PC), less memory, and no Git needed.
+- **No Python**: the generator tools now ship inside the engine (a single executable). Only Visual Studio Build Tools is needed; Python and Git are no longer required.
 - If you had already generated the port: the next generation deletes the old `ps2recomp\` folder and redoes it from step 3 on its own.
 ### es
 - **Motor propio**: el generador ya no descarga ni compila PS2Recomp. Ahora descarga el motor del port ya listo (verificado por SHA-256) y compila solo el código del juego: más rápido (de 5 a 30 minutos, según el PC), usa menos memoria y no necesita Git.
+- **Sin Python**: las herramientas del generador ahora vienen dentro del motor (un solo ejecutable). Solo hace falta Visual Studio Build Tools; ya no se necesitan Python ni Git.
 - Si ya tenías el port generado: la próxima generación borra la carpeta `ps2recomp\` antigua y rehace desde la etapa 3 sola.
 
 ## 03/11/2026 · 0.1.3
