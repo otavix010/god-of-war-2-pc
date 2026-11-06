@@ -21,11 +21,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ---------------------------------------------------------------------------
-PSXRecomp and recomp-ui (git submodules, fetched by gerar.ps1) and the files
-their project template generated here (CMakeLists.txt, codegen_setup.*, tools/,
-scripts/) are under the PolyForm Noncommercial License 1.0.0
-(https://polyformproject.org/licenses/noncommercial/1.0.0/). Because of it, this
-port as a whole may not be used commercially.
+O motor do port (pacote otx-motor-ps2, baixado pelo gerar.ps1) não é coberto por esta licença;
+os avisos de terceiros dele estão no TERCEIROS.txt do pacote.
 
-Silent Hill is a trademark of Konami Digital Entertainment. This repository
-contains no game code or data.
+God of War II e God of War são marcas da Sony Interactive Entertainment. Este é um projeto de fãs, sem fins lucrativos, sem relação com a Sony Interactive Entertainment nem o Santa Monica Studio nem endossado por eles.
+Este repositório não contém código nem dados do jogo.

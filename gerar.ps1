@@ -5,12 +5,12 @@
 .DESCRIPTION
   Faz tudo em ordem, e cada etapa pula se já foi feita (use -Refazer para refazer tudo,
   ou -RefazerDe N para refazer da etapa N em diante):
-    1. confere as ferramentas (Visual Studio Build Tools com C++ e CMake, Python, Git);
+    1. confere as ferramentas (Visual Studio Build Tools com C++ e CMake, Python);
     2. confere a sua ISO e extrai os arquivos do disco para trabalho\disc;
-    3. baixa o PS2Recomp na versão fixada, aplica as nossas correções e compila o tradutor;
+    3. baixa o motor do port (pacote pronto do motor PS2 Otavix, conferido pelo SHA-256);
     4. traduz o código do jogo (MIPS R5900 -> C++);
     5. traduz os microprogramas de geometria (VU1) do executável do seu disco para C++;
-    6. compila o jogo;
+    6. compila o jogo (só o código traduzido: o motor já vem compilado);
     7. deixa o jogar.cmd pronto.
   Os logs de cada etapa ficam em out\gerar\. Nada do jogo vem neste repositório: só o
   mapa de funções (endereços), as configurações da tradução e a "receita" do VU1 (onde os
@@ -22,8 +22,11 @@
 .PARAMETER Jobs
   Compilações em paralelo (padrão: pela memória livre, ~3 GB por compilação).
 .PARAMETER RefazerDe
-  Refaz da etapa N em diante. Depois de atualizar o port, -RefazerDe 3 aplica as correções
-  novas, retraduz e recompila sem extrair o disco de novo.
+  Refaz da etapa N em diante. Depois de atualizar o port, -RefazerDe 3 baixa o motor novo,
+  retraduz e recompila sem extrair o disco de novo.
+.PARAMETER Pacote
+  (testes) o .zip do motor já baixado: a etapa 3 usa ele em vez de baixar. O SHA-256 é
+  conferido do mesmo jeito (ou pelo <zip>.sha256 ao lado, para um motor ainda não publicado).
 .EXAMPLE
   gerar.cmd     (clique duas vezes: pede a ISO numa janela)
 .EXAMPLE
@@ -33,21 +36,31 @@ param(
     [string]$Iso = '',
     [int]$Jobs = 0,
     [int]$RefazerDe = 0,
-    [switch]$Refazer
+    [switch]$Refazer,
+    [string]$Pacote = ''
 )
 $ErrorActionPreference = 'Stop'
 $R = $PSScriptRoot
 if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R)" }
 $JOGO = Get-Content -Raw -Encoding UTF8 (Join-Path $R 'jogo\jogo.json') | ConvertFrom-Json
-$PS2RECOMP_URL = 'https://github.com/ran-j/PS2Recomp.git'
-$PS2RECOMP_SHA = 'e5636981a1c9de368f6b71e819c3dc188dfedbf4'
-$MINGIT_URL = 'https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.3/MinGit-2.56.0.3-64-bit.zip'
+
+# motor do port: pacote fechado (tradutor, bibliotecas do runtime, cabeçalhos e o build do jogo), um por versão
+$MOTOR_VERSAO = '0.1.0'
+$MOTOR_NOME = "otx-motor-ps2-$MOTOR_VERSAO"
+$MOTOR_URL = "https://github.com/otavix010/otx-motor-ps2/releases/download/v$MOTOR_VERSAO/$MOTOR_NOME.zip"
+# cópia no servidor do launcher (o mesmo arquivo; vem primeiro, o GitHub fica de reserva)
+$MOTOR_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/motor/ps2/$MOTOR_NOME.zip"
+$MOTOR_SHA256 = 'b49e931bfe9f1306c710e9555dd7217ae237c4755c621d700c1385686d888c22'
+
 $T = Join-Path $R 'trabalho'
 $OUT = Join-Path $R 'out\gerar'
+$PAC = Join-Path $R "motor\$MOTOR_NOME"   # o pacote aberto
+$C = Join-Path $R 'codigo'                # o código do jogo (traduzido aqui) + o build
 New-Item -ItemType Directory -Force $OUT, $T | Out-Null
-if ($RefazerDe -gt 0) {
-    Get-ChildItem $OUT -Filter '*.ok' | Where-Object { [int]($_.Name.Split('_')[0]) -ge $RefazerDe } | Remove-Item -Force
+function Tira-Marcas([int]$de) {
+    Get-ChildItem $OUT -Filter '*.ok' | Where-Object { $_.Name -match '^\d+_' -and [int]($_.Name.Split('_')[0]) -ge $de } | Remove-Item -Force
 }
+if ($RefazerDe -gt 0) { Tira-Marcas $RefazerDe }
 
 function Msg($t) { Write-Host "[gerar] $t" -ForegroundColor Cyan }
 # roda um programa externo sem que o stderr dele vire exceção (Windows PowerShell 5.1 com
@@ -97,6 +110,17 @@ function Sha1([string]$arq) {
     if (-not $r) { throw "não consegui ler `"$arq`" (aberto em outro programa, ainda baixando ou só na nuvem, sem cópia local?)" }
     $r.Hash.ToLower()
 }
+function Sha256([string]$arq) { (Get-FileHash -Algorithm SHA256 -LiteralPath $arq).Hash.ToLower() }
+
+# geração antiga (até a 0.4.x: PS2Recomp clonado e compilado aqui) ou motor de outra versão: refaz da etapa 3
+# (o disco já extraído continua valendo)
+if (-not (Test-Path -LiteralPath (Join-Path $PAC 'VERSAO.txt'))) {
+    if (Get-ChildItem $OUT -Filter '*.ok' | Where-Object { $_.Name -match '^[3-7]_' }) {
+        Msg "motor novo ($MOTOR_NOME): refazendo da etapa 3 (o disco extraído continua valendo)"
+    }
+    Tira-Marcas 3
+    Remove-Item (Join-Path $OUT '3_ps2recomp.log') -ErrorAction SilentlyContinue
+}
 
 # ---------------------------------------------------------------------------- ferramentas
 function Achar-VS {
@@ -106,32 +130,6 @@ function Achar-VS {
     if ($p) { return ($p | Select-Object -First 1) }
     return $null
 }
-# o git só vale se rodar (um MinGit incompleto ou barrado pelo antivírus sai com 0xC0000135): o portátil quebrado é
-# apagado para a etapa 1 baixar de novo
-function Git-Roda([string]$exe) {
-    try { $o = & $exe --version 2>$null; return ($LASTEXITCODE -eq 0 -and "$o" -match 'git version') } catch { return $false }
-}
-function Achar-Git {
-    $g = Get-Command git.exe -ErrorAction SilentlyContinue
-    if ($g -and (Git-Roda $g.Source)) { return $g.Source }
-    $m = Join-Path $R 'dl\mingit\cmd\git.exe'
-    if (Test-Path -LiteralPath $m) {
-        if (Git-Roda $m) { return $m }
-        Remove-Item -LiteralPath (Join-Path $R 'dl\mingit') -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    return $null
-}
-function Baixa-MinGit {
-    Msg "baixando o Git portátil (MinGit) de $MINGIT_URL"
-    $zip = Join-Path $R 'dl\mingit.zip'
-    New-Item -ItemType Directory -Force (Join-Path $R 'dl') | Out-Null
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $MINGIT_URL -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath (Join-Path $R 'dl\mingit') -Force
-    Remove-Item $zip
-    if (-not (Achar-Git)) { throw 'o Git portátil não roda (dl\mingit\cmd\git.exe). Se o antivírus bloqueou, libere a pasta do port e gere de novo.' }
-}
 Etapa '1_ferramentas' {
     $falta = @()
     # "python" pode ser o atalho da Microsoft Store (abre a loja, não roda nada)
@@ -139,19 +137,19 @@ Etapa '1_ferramentas' {
     try { $v = (cmd /c 'python -c "import sys; print(sys.version_info[0]*100+sys.version_info[1])" 2>nul') } catch { }
     if (-not ($v -match '^\d+$')) { $falta += 'Python 3.11 ou mais novo (winget install Python.Python.3.12) -- e feche/abra o terminal depois' }
     elseif ([int]$v -lt 311) { $falta += 'Python 3.11 ou mais novo (winget install Python.Python.3.12)' }
-    if (-not (Achar-VS)) {
+    $vs = Achar-VS
+    if (-not $vs) {
         $falta += 'Visual Studio 2022 Build Tools com C++ e "C++ CMake tools":' +
                   "`r`n    winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --includeRecommended`""
     }
     if ($falta) { throw ("Falta instalar:`r`n  - " + ($falta -join "`r`n  - ")) }
-    if (-not (Achar-Git)) { Baixa-MinGit }
+    Anotar $LOG "Python $v; Visual Studio em $vs"
+    # opcional: com o clang-cl do Visual Studio a geometria (VU1) compila com ele e roda um pouco mais rápido
+    if (Test-Path (Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe')) { Anotar $LOG 'clang-cl: sim' }
+    else { Msg 'sem o "C++ Clang tools" do Visual Studio: a geometria compila com o MSVC (funciona igual, um pouco mais lenta)' }
 }
 $VS = Achar-VS
 if (-not $VS) { throw 'Visual Studio Build Tools com C++ e CMake não encontrado (rode de novo a etapa 1: -RefazerDe 1)' }
-$GIT = Achar-Git
-if (-not $GIT) { Baixa-MinGit; $GIT = Achar-Git } # o portátil sumiu ou quebrou depois da etapa 1
-# o CMake baixa as dependências do PS2Recomp com o git: o portátil precisa estar no PATH
-$env:PATH = (Split-Path $GIT) + ';' + $env:PATH
 # o vcvars64.bat procura o vswhere.exe no PATH
 $env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;" + $env:PATH
 $VCVARS = Join-Path $VS 'VC\Auxiliary\Build\vcvars64.bat'
@@ -212,53 +210,182 @@ Etapa '2_disco' {
     [IO.File]::WriteAllText((Join-Path $T 'iso.txt'), $Iso, (New-Object Text.UTF8Encoding $false))
 }
 
-# ---------------------------------------------------------------------------- PS2Recomp
-$P = Join-Path $R 'ps2recomp'
-Etapa '3_ps2recomp' {
-    # pasta com .git quebrado (clone interrompido, cópia por zip) ou sem o commit fixo: apaga e baixa de novo
-    $ok = $false
-    if (Test-Path -LiteralPath (Join-Path $P '.git')) {
-        $topo = SemExcecao { & $GIT -c safe.directory=* -C $P rev-parse --show-toplevel 2>$null }
-        if ($LASTEXITCODE -eq 0 -and $topo -and ((Resolve-Path -LiteralPath $topo).Path.TrimEnd('\') -eq (Resolve-Path -LiteralPath $P).Path.TrimEnd('\'))) {
-            SemExcecao { & $GIT -c safe.directory=* -C $P cat-file -e "$PS2RECOMP_SHA^{commit}" 2>$null }
-            $ok = ($LASTEXITCODE -eq 0)
+# ---------------------------------------------------------------------------- motor
+# baixa um arquivo (curl.exe do Windows; senão Invoke-WebRequest), por um .part, com o tamanho baixado no log da
+# etapa a cada 3 s (é a linha que o launcher mostra)
+function Curl-Com-Progresso([string]$exe, [string]$url, [string]$part, [string]$extra) {
+    $si = New-Object Diagnostics.ProcessStartInfo
+    $si.FileName = $exe
+    $si.Arguments = "-L --fail --retry 3 --silent --show-error $extra -o `"$part`" `"$url`""
+    $si.UseShellExecute = $false; $si.CreateNoWindow = $true; $si.RedirectStandardError = $true
+    $p = [Diagnostics.Process]::Start($si)
+    $err = $p.StandardError.ReadToEndAsync()
+    $nome = Split-Path -Leaf ($part -replace '\.part$', '')
+    $ultimo = -1
+    while (-not $p.WaitForExit(3000)) {
+        $mb = 0; try { $mb = [int]((Get-Item -LiteralPath $part -ErrorAction Stop).Length / 1MB) } catch { }
+        if ($mb -ne $ultimo) {
+            $ultimo = $mb
+            if ($script:LOG) { Anotar $script:LOG "baixando $nome... $mb MB" }
         }
     }
-    if ($ok) {
-        Msg 'PS2Recomp já baixado'
-    } else {
-        if (Test-Path -LiteralPath $P) { Msg 'PS2Recomp incompleto: baixando de novo'; Remove-Item -LiteralPath $P -Recurse -Force }
-        Msg "baixando o PS2Recomp ($PS2RECOMP_URL)"
-        Exec $LOG "`"$GIT`" -c safe.directory=* clone --quiet $PS2RECOMP_URL `"$P`""
-    }
-    # --force descarta as correções antigas: elas são aplicadas de novo logo abaixo
-    Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" -c advice.detachedHead=false checkout --force --quiet $PS2RECOMP_SHA"
-    Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" clean -fdq ps2xRuntime ps2xIOP"
-    foreach ($pt in Get-ChildItem (Join-Path $R 'patches') -Filter '*.patch' | Sort-Object Name) {
-        Msg "aplicando patches\$($pt.Name)"
-        Exec $LOG "`"$GIT`" -c safe.directory=* -C `"$P`" apply --whitespace=nowarn `"$($pt.FullName)`""
-    }
-    Msg 'compilando o tradutor (ps2_recomp)'
-    $b = Join-Path $P 'out\ferramentas'
-    Exec $LOG (ComVS "cmake -S `"$P`" -B `"$b`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPS2X_AVX2=OFF -DPS2X_BUILD_RUNTIME=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_BUILD_ANALYZER=OFF")
-    Exec $LOG (ComVS "cmake --build `"$b`" --target ps2_recomp")
+    $p.WaitForExit()
+    $e = $err.Result
+    if ($e -and $script:LOG) { Anotar $script:LOG $e.Trim() }
+    return $p.ExitCode
 }
-$RECOMP = Get-ChildItem (Join-Path $P 'out\ferramentas') -Recurse -Filter 'ps2_recomp.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+function Baixar([string]$url, [string]$destino) {
+    New-Item -ItemType Directory -Force (Split-Path $destino) | Out-Null
+    $part = "$destino.part"
+    Remove-Item $part -ErrorAction SilentlyContinue
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    $erroCurl = $null
+    if ($curl) {
+        # antivírus ou política do Windows podem barrar o curl.exe: aí vai pelo próprio PowerShell, abaixo
+        try {
+            $cod = Curl-Com-Progresso $curl.Source $url $part ''
+            # curl 35 (CRYPT_E_NO_REVOCATION_CHECK): a rede ou o antivírus não deixa consultar a revogação do
+            # certificado; de novo sem essa consulta (o certificado continua conferido)
+            if ($cod -eq 35) { $cod = Curl-Com-Progresso $curl.Source $url $part '--ssl-no-revoke' }
+            if ($cod -ne 0) { $erroCurl = "curl $cod" }
+        } catch {
+            $erroCurl = "o curl.exe não pôde rodar: $($_.Exception.Message)"
+        }
+    }
+    if (-not $curl -or $erroCurl) {
+        if ($erroCurl) { Msg "download pelo curl falhou ($erroCurl); tentando pelo PowerShell" }
+        Remove-Item $part -ErrorAction SilentlyContinue
+        $ProgressPreference = 'SilentlyContinue'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        try { Invoke-WebRequest -Uri $url -OutFile $part -UseBasicParsing }
+        catch { throw "falhou o download de $url ($(if ($erroCurl) { "$erroCurl; " })PowerShell: $($_.Exception.Message))" }
+    }
+    Move-Item $part $destino -Force
+}
+Etapa '3_motor' {
+    # o que a geração antiga deixou (PS2Recomp clonado e compilado, Git portátil): não serve mais e ocupa vários GB
+    foreach ($velho in 'ps2recomp', 'dl\mingit') {
+        $v = Join-Path $R $velho
+        if (Test-Path -LiteralPath $v) {
+            Msg "apagando $velho\ (da geração antiga, não é mais usado)"
+            Remove-Item -LiteralPath $v -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($Pacote) {
+        if (-not (Test-Path -LiteralPath $Pacote -PathType Leaf)) { throw "o pacote do motor não existe: $Pacote" }
+        $zip = (Resolve-Path -LiteralPath $Pacote).Path
+        Msg "motor: usando $zip (sem baixar)"
+        $h = Sha256 $zip
+        if ($h -ne $MOTOR_SHA256) {
+            $lado = "$zip.sha256"
+            if ((Test-Path -LiteralPath $lado) -and (((Get-Content -LiteralPath $lado -TotalCount 1) -split '\s+')[0].ToLower() -eq $h)) {
+                Msg "AVISO: esse pacote não é o $MOTOR_NOME publicado; conferido pelo .sha256 ao lado"
+            } else { throw "o SHA-256 do pacote não confere ($h; esperado $MOTOR_SHA256)" }
+        }
+    } else {
+        $zip = Join-Path $R "dl\$MOTOR_NOME.zip"
+        $ok = $false
+        foreach ($url in $MOTOR_ESPELHO, $MOTOR_URL) {
+            Msg "baixando o motor ($MOTOR_NOME) de $url"
+            try {
+                Baixar $url $zip
+                $h = Sha256 $zip
+                if ($h -ne $MOTOR_SHA256) { throw "SHA-256 diferente ($h)" }
+                $ok = $true; break
+            } catch {
+                Anotar $LOG "não veio de $url`: $($_.Exception.Message)"
+                Msg "não veio de $url ($($_.Exception.Message))"
+                Remove-Item $zip -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not $ok) { throw "não consegui baixar o motor ($MOTOR_NOME). Confira a internet e se o antivírus não está bloqueando o download, e gere de novo." }
+    }
+    Anotar $LOG "SHA-256 do motor: $h"
+    # abre numa pasta à parte e só então põe no lugar (um pacote aberto pela metade nunca fica como bom)
+    $base = Join-Path $R 'motor'
+    $abre = Join-Path $base '_abrindo'
+    if (Test-Path -LiteralPath $abre) { Remove-Item -LiteralPath $abre -Recurse -Force }
+    New-Item -ItemType Directory -Force $abre | Out-Null
+    try { Expand-Archive -LiteralPath $zip -DestinationPath $abre -Force }
+    catch { throw "o motor baixou inteiro (conferido), mas não foi extraído: $($_.Exception.Message). Confira o espaço livre no disco e se o antivírus não está bloqueando a pasta do jogo, e gere de novo." }
+    $dentro = Join-Path $abre $MOTOR_NOME
+    foreach ($a in 'VERSAO.txt', 'bin\otx_tradutor.exe', 'cmake\CMakeLists.txt', 'ferramentas\mapa_hle_proprio.py', 'ferramentas\tabela_propria.py', 'ferramentas\limpa_csv.py',
+                   'include\ps2xRuntime\ps2_call_list.h', 'lib\avx2\ps2_runtime.lib', 'lib\sse4\ps2_runtime.lib') {
+        if (-not (Test-Path -LiteralPath (Join-Path $dentro $a))) { throw "o pacote do motor está incompleto (falta $a)" }
+    }
+    # motores de versões anteriores saem
+    Get-ChildItem $base -Directory | Where-Object { $_.Name -ne '_abrindo' } | Remove-Item -Recurse -Force
+    Move-Item -LiteralPath $dentro $PAC
+    Remove-Item -LiteralPath $abre -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not $Pacote) { Remove-Item $zip -ErrorAction SilentlyContinue }
+    Anotar $LOG (Get-Content (Join-Path $PAC 'VERSAO.txt') -TotalCount 1 -Encoding UTF8)
+}
+if (-not (Test-Path -LiteralPath (Join-Path $PAC 'bin\otx_tradutor.exe'))) { throw "o motor não está em $PAC (rode -RefazerDe 3)" }
 
 # ---------------------------------------------------------------------------- tradução
-Etapa '4_traduzir' {
-    if (-not $RECOMP) { throw 'o ps2_recomp.exe não foi compilado (rode -RefazerDe 3)' }
-    foreach ($a in 'analisador.toml', 'ghidra_config.toml', 'ghidra_funcoes.csv', 'entradas_extra.txt', 'stubs_extra.txt', 'stubs_tirar.txt', 'remendos.txt') {
-        $o = Join-Path $R "jogo\$a"
-        if (Test-Path -LiteralPath $o) { Copy-Item -LiteralPath $o $T -Force }
+# remendos.txt do jogo ("<endereço hex> <instrução hex>  # comentário"): instruções trocadas só no código traduzido,
+# numa cópia do executável (o do disco fica como está)
+function Remendar-Elf([string]$origem, [string]$destino, [string]$arqRem) {
+    $b = [IO.File]::ReadAllBytes($origem)
+    $phoff = [BitConverter]::ToUInt32($b, 0x1C); $phtam = [BitConverter]::ToUInt16($b, 0x2A); $phnum = [BitConverter]::ToUInt16($b, 0x2C)
+    $n = 0
+    foreach ($linha in [IO.File]::ReadAllLines($arqRem)) {
+        $l = $linha.Split('#')[0].Trim()
+        if (-not $l) { continue }
+        $c = $l -split '\s+'
+        $end = [Convert]::ToUInt32($c[0], 16); $val = [Convert]::ToUInt32($c[1], 16)
+        $pos = -1
+        for ($i = 0; $i -lt $phnum; $i++) {
+            $ph = [int]($phoff + $i * $phtam)
+            if ([BitConverter]::ToUInt32($b, $ph) -ne 1) { continue }   # só PT_LOAD
+            $off = [BitConverter]::ToUInt32($b, $ph + 4); $va = [BitConverter]::ToUInt32($b, $ph + 8); $tam = [BitConverter]::ToUInt32($b, $ph + 16)
+            if ($end -ge $va -and ($end + 4) -le ($va + $tam)) { $pos = [int]($off + ($end - $va)); break }
+        }
+        if ($pos -lt 0) { throw ("remendo fora do executável: {0:X8} (jogo\remendos.txt)" -f $end) }
+        [Array]::Copy([BitConverter]::GetBytes($val), 0, $b, $pos, 4)
+        $n++
     }
-    Exec $LOG "python `"$R\ferramentas\monta_config.py`" `"$T`" `"disc/$($JOGO.elf.Replace('\', '/'))`""
+    New-Item -ItemType Directory -Force (Split-Path $destino) | Out-Null
+    [IO.File]::WriteAllBytes($destino, $b)
+    return $n
+}
+$RUNNER = Join-Path $C 'src\runner'
+$HLE = Join-Path $T 'hle.txt'
+Etapa '4_traduzir' {
+    New-Item -ItemType Directory -Force $C | Out-Null
+    if (Test-Path -LiteralPath $RUNNER) { Remove-Item -LiteralPath $RUNNER -Recurse -Force }
+    New-Item -ItemType Directory -Force $RUNNER | Out-Null
+    Copy-Item (Join-Path $PAC 'cmake\CMakeLists.txt') (Join-Path $C 'CMakeLists.txt') -Force
+    $elfT = $ELF
+    $rem = Join-Path $R 'jogo\remendos.txt'
+    if (Test-Path -LiteralPath $rem) {
+        $elfT = Join-Path $T ('traduzir\' + (Split-Path -Leaf $JOGO.elf))
+        $n = Remendar-Elf $ELF $elfT $rem
+        Anotar $LOG "$n remendos de instrução (jogo\remendos.txt)"
+    }
+    Msg 'mapa das funções do sistema (HLE)'
+    Exec $LOG "python -I `"$PAC\ferramentas\mapa_hle_proprio.py`" `"$R\jogo`" `"$HLE`" --elf `"$ELF`" --lista `"$PAC\include\ps2xRuntime\ps2_call_list.h`" --fora `"$PAC\ferramentas\hle_fora.txt`""
     $g = Join-Path $T 'gerado'
     if (Test-Path -LiteralPath $g) { Remove-Item -LiteralPath $g -Recurse -Force }
     New-Item -ItemType Directory -Force $g | Out-Null
+    $extras = Join-Path $R 'jogo\entradas_extra.txt'
+    if (-not (Test-Path -LiteralPath $extras)) { $extras = '-' }
     Msg 'traduzindo o código do jogo (alguns minutos)'
-    Exec $LOG "`"$($RECOMP.FullName)`" `"$T\config.toml`""
-    Exec $LOG "python `"$R\ferramentas\sincroniza.py`" `"$g`" `"$P\ps2xRuntime\src\runner`" `"$P\ps2xRuntime\include`""
+    # fins inflados do CSV do Ghidra corrigidos pelo tamanho (senão uma função engole megabytes de código)
+    $csvT = Join-Path $T 'funcoes.csv'
+    Exec $LOG "python -I `"$PAC\ferramentas\limpa_csv.py`" `"$R\jogo\ghidra_funcoes.csv`" `"$csvT`""
+    Exec $LOG "`"$PAC\bin\otx_tradutor.exe`" `"$elfT`" `"$csvT`" `"$extras`" `"$g`" 400 --hle `"$HLE`""
+    Copy-Item (Join-Path $g '*') $RUNNER -Force
+    Copy-Item (Join-Path $PAC 'include\abi\*.h') $RUNNER -Force
+    # o código gerado fala com o runtime pela ABI atual do motor
+    $jh = Join-Path $RUNNER 'otx_jogo.h'
+    $txt = [IO.File]::ReadAllText($jh)
+    [IO.File]::WriteAllText($jh, $txt.Replace('#include "otx_abi.h"', "#define OTX_ABI_RUNTIME_ATUAL`n#include `"otx_abi.h`""))
+    Msg 'tabela de funções'
+    Exec $LOG "python -I `"$PAC\ferramentas\tabela_propria.py`" `"$RUNNER\otx_jogo_tabela.cpp`" `"$RUNNER\register_functions.cpp`" `"$R\jogo`" --elf `"$ELF`" --hle `"$HLE`""
+    Remove-Item (Join-Path $RUNNER 'otx_jogo_tabela.cpp') -Force
+    Remove-Item -LiteralPath $g -Recurse -Force
+    Anotar $LOG "$((Get-ChildItem $RUNNER -File).Count) arquivos em codigo\src\runner"
 }
 
 # ---------------------------------------------------------------------------- VU1 (geometria)
@@ -267,7 +394,9 @@ Etapa '4_traduzir' {
 # (confere o SHA-1) e o vu1_tradutor.py gera o C++. Sem receita ou se algo falhar, o VU1 fica no interpretador:
 # o jogo roda igual, só que bem mais devagar.
 Etapa '5_vu1' {
-    $vu = Join-Path $P 'ps2xRuntime\src\lib\vu'
+    $vu = Join-Path $C 'src\vu'
+    if (Test-Path -LiteralPath $vu) { Remove-Item -LiteralPath $vu -Recurse -Force }
+    New-Item -ItemType Directory -Force $vu | Out-Null
     $dv = Join-Path $T 'vu1'
     if (Test-Path -LiteralPath $dv) { Remove-Item -LiteralPath $dv -Recurse -Force }
     $rec = Join-Path $R 'jogo\vu1_receita.json'
@@ -292,26 +421,26 @@ Etapa '5_vu1' {
 }
 
 # ---------------------------------------------------------------------------- compilar
-# AVX2 só se a CPU tiver (o código traduzido fica mais rápido com ele)
+# bibliotecas do motor com AVX2 só se a CPU tiver (o código traduzido fica mais rápido com ele); senão as SSE4
 Add-Type -Namespace Otavix -Name Cpu -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint f);'
 $avx2 = [Otavix.Cpu]::IsProcessorFeaturePresent(40)
+$VARIANTE = if ($avx2) { 'avx2' } else { 'sse4' }
+# teste: OTX_VARIANTE=sse4 força as bibliotecas sem AVX2 num PC que tem AVX2
+if ($env:OTX_VARIANTE -in 'avx2', 'sse4') { $VARIANTE = $env:OTX_VARIANTE }
 if (-not $Jobs) {
     # cada pedaço do código traduzido usa de 1 a 3 GB de memória para compilar
     $livre = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB
     $Jobs = [math]::Max(1, [math]::Min([Environment]::ProcessorCount, [math]::Floor($livre / 3)))
 }
-$BJ = Join-Path $P 'out\jogo'
+$BJ = Join-Path $C 'out\jogo'
 Etapa '6_compilar' {
-    $arch = if ($avx2) { '/arch:AVX2 ' } else { '' }
     # os microprogramas do VU1 compilam com o clang-cl do Visual Studio se ele estiver instalado (mais rápido);
     # sem ele, com o próprio MSVC
     $lancador = (Join-Path $R 'ferramentas\otx_lanca.py').Replace('\', '/')
-    Msg "compilando o jogo ($Jobs compilações em paralelo$(if ($avx2) { ', AVX2' }); de 20 min a 1 h)"
-    $cfg = "-DCMAKE_BUILD_TYPE=RelWithDebInfo `"-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/O2 /Ob2 /Oi /DNDEBUG $arch/GS- /bigobj`" `"-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /DNDEBUG`" " +
-           "`"-DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO=/INCREMENTAL:NO`" -DPS2X_ENABLE_AGRESSIVE_LOGS=OFF -DPS2X_ENABLE_IOP_RPC_TRACE=OFF " +
-           "-DPS2X_SHOW_WINDOWS_CONSOLE=OFF -DPS2X_BUILD_TEST=OFF -DPS2X_BUILD_STUDIO=OFF -DPS2X_BUILD_ANALYZER=OFF " +
-           "`"-DPS2X_VU1_LANCADOR=$lancador`""
-    Exec $LOG (ComVS "cmake -S `"$P`" -B `"$BJ`" -G Ninja $cfg")
+    $pac = $PAC.Replace('\', '/')
+    Msg "compilando o jogo ($Jobs compilações em paralelo, motor $VARIANTE; de 5 a 30 min)"
+    $cfg = "`"-DOTX_PACOTE=$pac`" -DOTX_VARIANTE=$VARIANTE `"-DPS2X_VU1_LANCADOR=$lancador`""
+    Exec $LOG (ComVS "cmake -S `"$C`" -B `"$BJ`" -G Ninja $cfg")
     Exec $LOG (ComVS "cmake --build `"$BJ`" --target ps2EntryRunner --parallel $Jobs")
     if (-not (Test-Path (Join-Path $BJ 'ps2xRuntime\ps2EntryRunner.exe'))) { throw "o executável não foi gerado (veja $LOG)" }
 }
