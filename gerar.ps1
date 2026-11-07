@@ -323,6 +323,13 @@ Etapa '2_disco' {
     }
     $he = Sha1 $ELF
     if ($JOGO.elf_sha1 -notcontains $he) {
+        # o extrai_iso pula arquivo que já existe com o mesmo tamanho: um executável estragado de uma extração interrompida ficaria; extrai de novo
+        Msg 'o executável extraído não confere: extraindo ele de novo'
+        Remove-Item -LiteralPath $ELF -Force
+        Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
+        $he = Sha1 $ELF
+    }
+    if ($JOGO.elf_sha1 -notcontains $he) {
         throw "o executável do jogo não é o da versão suportada ($($JOGO.versao), $($JOGO.serial)). SHA-1 dele: $he"
     }
     # o jogo lê setores direto do disco: o jogar.cmd entrega a ISO ao runtime
