@@ -24,7 +24,8 @@
         "PS2X_MPEG_CALLBACK_SINCRONO": "1",
         "PS2X_MPEG_IPU_FONTE": "0",
         "PS2X_GS_INTC_ATRASO_US": "500",
-        "PS2X_POKE_30": "2D80B8=30"
+        "PS2X_POKE_30": "2D80B8=30",
+        "PS2X_MC_SIO2": "1"
     },
     "vu1_quentes": "todos"
 }

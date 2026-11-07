@@ -1,7 +1,20 @@
 # Novidades do port
 
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
-"## 06/11/2026 · 0.1.5
+"## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
+
+## 07/11/2026 · 0.1.6
+### pt
+- **Memory card funciona**: o jogo agora encontra o cartão, salva nos altares e carrega o save. Também ficou mais rápido para ler e gravar.
+- Motor 0.1.7: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo). O cartão é novo e é formatado na primeira vez.
+### en
+- **Memory card works**: the game now finds the card, saves at the altars and loads the save. Reading and writing are faster too.
+- Engine 0.1.7: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept). The card is new and gets formatted the first time.
+### es
+- **La memory card funciona**: el juego ahora encuentra la tarjeta, guarda en los altares y carga la partida. También lee y graba más rápido.
+- Motor 0.1.7: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene). La tarjeta es nueva y se formatea la primera vez.
+
+## 06/11/2026 · 0.1.5
 ### pt
 - **Mais fps pelo launcher**: aberto pelo launcher, o jogo deixava de usar a thread própria de desenho e esperava a placa de vídeo a cada quadro. Isso derrubava o fps, principalmente em placas de entrada (RTX 5060, por exemplo). Corrigido.
 - **Sem faixa verde no fim da tela**: o efeito de brilho reduzia a imagem lendo uma linha de fora do quadro, o que deixava uma faixa esverdeada embaixo (mais visível em 21:9). Corrigido.
@@ -14,8 +27,6 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 - **Más fps desde el launcher**: abierto desde el launcher, el juego dejaba de usar su propio hilo de dibujo y esperaba a la tarjeta gráfica en cada fotograma. Eso bajaba los fps, sobre todo en tarjetas de entrada (una RTX 5060, por ejemplo). Corregido.
 - **Sin franja verde al final de la pantalla**: el efecto de brillo reducía la imagen leyendo una línea de fuera del cuadro, lo que dejaba una franja verdosa abajo (más visible en 21:9). Corregido.
 - Motor 0.1.2: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
-
-## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
 ## 06/11/2026 · 0.1.4
 ### pt
