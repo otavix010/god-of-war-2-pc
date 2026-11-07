@@ -148,6 +148,9 @@ Etapa '1_ferramentas' {
 }
 $VS = Achar-VS
 if (-not $VS) { throw 'Visual Studio Build Tools com C++ e CMake não encontrado (rode de novo a etapa 1: -RefazerDe 1)' }
+# entradas do PATH entre aspas (ex.: "C:\Program Files (x86)\...") quebram o vcvars64.bat
+# com "\Microsoft foi inesperado neste momento" (report 967): tira as aspas
+$env:PATH = ($env:PATH -split ';' | ForEach-Object { $_.Trim().Trim('"') } | Where-Object { $_ }) -join ';'
 # o vcvars64.bat procura o vswhere.exe no PATH
 $env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;" + $env:PATH
 $VCVARS = Join-Path $VS 'VC\Auxiliary\Build\vcvars64.bat'
@@ -156,7 +159,7 @@ $TMPC = Join-Path $R 'out\tmp'
 New-Item -ItemType Directory -Force $TMPC | Out-Null
 function ComVS([string]$linha) { "call `"$VCVARS`" >nul && set `"TEMP=$TMPC`" && set `"TMP=$TMPC`" && $linha" }
 # sem o Windows SDK o CMake falha em "Detecting C compiler ABI" (RC Pass 1 failed, CMAKE_MT-NOTFOUND): avisa antes
-cmd /c (ComVS 'where rc.exe mt.exe') *> $null
+SemExcecao { cmd /c (ComVS 'where rc.exe mt.exe') *> $null }
 if ($LASTEXITCODE -ne 0) { throw 'falta o Windows SDK (rc.exe/mt.exe) no Visual Studio Build Tools. Abra o Visual Studio Installer > Modificar > marque "SDK do Windows 11" (ou 10) e gere de novo.' }
 
 # ---------------------------------------------------------------------------- disco
