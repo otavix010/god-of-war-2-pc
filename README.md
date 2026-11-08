@@ -1,4 +1,20 @@
-# God of War II — port nativo para PC
+<h1 align="center">God of War II — port nativo para PC</h1>
+
+<p align="center"><i>God of War II (PS2, NTSC-U SCUS-97481): port nativo para PC por recompilação estática (PS2Recomp). Gera a partir da sua ISO. Beta.</i></p>
+
+<p align="center">
+  <a href="https://github.com/otavix010/god-of-war-2-pc/commits/main"><img alt="Última atualização" src="https://img.shields.io/github/last-commit/otavix010/god-of-war-2-pc?label=%C3%BAltima%20atualiza%C3%A7%C3%A3o"></a>
+  <a href="https://github.com/otavix010/otavix-launcher/releases/latest"><img alt="Baixar o Otavix Launcher" src="https://img.shields.io/badge/Otavix%20Launcher-baixar-b00020"></a>
+</p>
+
+<p align="center">
+  <a href="#o-que-é">O que é</a> ·
+  <a href="#estado-atual-beta">Estado atual: beta</a> ·
+  <a href="#opções">Opções</a> ·
+  <a href="#como-gerar">Como gerar</a> ·
+  <a href="#como-funciona">Como funciona</a> ·
+  <a href="#english-summary">English</a>
+</p>
 
 > **Projeto de fãs, sem fins lucrativos.** *God of War II* e *God of War* são marcas da Sony Interactive Entertainment; o jogo foi desenvolvido pelo Santa Monica Studio. Este projeto não tem relação com a Sony Interactive Entertainment. Este repositório **não contém o jogo**: você precisa da **sua própria cópia** do DVD (a versão americana, **SCUS-97481**).
 
