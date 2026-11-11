@@ -333,7 +333,27 @@ Etapa '2_disco' {
         $he = Sha1 $ELF
     }
     if ($JOGO.elf_sha1 -notcontains $he) {
-        throw "o executável do jogo não é o da versão suportada ($($JOGO.versao), $($JOGO.serial)). SHA-1 dele: $he"
+        # diz ao jogador por que não serve (pt/en/es): o serial do SYSTEM.CNF diferente do suportado = outra edição (região ou
+        # versão); o mesmo serial com outro executável = executável modificado (patch, tradução, hack) ou outra tiragem do disco
+        $serial = ''
+        $cnf = Join-Path $T 'disc\SYSTEM.CNF'
+        if ((Test-Path -LiteralPath $cnf) -and ((Get-Content -Raw -LiteralPath $cnf) -match 'BOOT2\s*=\s*cdrom0?:\\?([^;\r\n]+)')) {
+            $serial = [IO.Path]::GetFileName($Matches[1].Trim()) -replace '_', '-' -replace '\.', ''
+        }
+        $suportado = ($JOGO.serial -replace '[^A-Za-z0-9]', '').ToUpper()
+        $lido = ($serial -replace '[^A-Za-z0-9]', '').ToUpper()
+        $txtSerial = if ($serial) { $serial } else { '?' }
+        if ($lido -and $lido -ne $suportado) {
+            $pt = "Edição diferente (outra região/versão): o disco é $txtSerial e o port suporta só $($JOGO.serial) ($($JOGO.versao))."
+            $en = "Different edition (another region/version): the disc is $txtSerial and this port only supports $($JOGO.serial)."
+            $es = "Edición diferente (otra región/versión): el disco es $txtSerial y este port solo admite $($JOGO.serial)."
+        } else {
+            $pt = "Executável modificado: o disco é $txtSerial, mas o executável não é o original da versão suportada ($($JOGO.versao)). Pode ser uma cópia com patch, tradução ou hack, ou outra tiragem do disco."
+            $en = "Modified executable: the disc is $txtSerial, but its executable is not the original one of the supported version. It may be a patched, translated or hacked copy, or another print of the disc."
+            $es = "Ejecutable modificado: el disco es $txtSerial, pero su ejecutable no es el original de la versión admitida. Puede ser una copia con parche, traducción o hack, u otra tirada del disco."
+        }
+        Anotar $LOG "serial do disco: $txtSerial (suportado: $($JOGO.serial)); SHA-1 do executável: $he"
+        throw "o executável do jogo não é o da versão suportada.`r`n  $pt`r`n  $en`r`n  $es`r`n  (SHA-1 do executável: $he)"
     }
     # o jogo lê setores direto do disco: o jogar.cmd entrega a ISO ao runtime
     # UTF-8 sem BOM: o jogar.cmd lê com chcp 65001 (um BOM viraria parte do caminho)
