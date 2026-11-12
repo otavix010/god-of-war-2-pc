@@ -3,6 +3,20 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 12/11/2026 · 0.1.7
+### pt
+- **O save fica gravado no disco**: a pasta do memory card não era criada na instalação, e o jogo salvava só enquanto estava aberto. Agora a pasta é criada e o save continua lá ao abrir o jogo de novo.
+- Na primeira vez depois de uma atualização, uma mensagem avisa enquanto os gráficos são preparados (pode levar até 1 minuto).
+- Motor 0.1.8: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Saves are kept on disk**: the memory card folder was not created on install, so the game only saved while it was open. The folder is now created and the save is still there when the game is opened again.
+- The first time after an update, a message is shown while the graphics are being prepared (it may take up to 1 minute).
+- Engine 0.1.8: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **La partida queda grabada en el disco**: la carpeta de la memory card no se creaba en la instalación y el juego solo guardaba mientras estaba abierto. Ahora la carpeta se crea y la partida sigue ahí al abrir el juego de nuevo.
+- La primera vez tras una actualización, un mensaje avisa mientras se preparan los gráficos (puede tardar hasta 1 minuto).
+- Motor 0.1.8: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 07/11/2026 · 0.1.6
 ### pt
 - **Memory card funciona**: o jogo agora encontra o cartão, salva nos altares e carrega o save. Também ficou mais rápido para ler e gravar.
