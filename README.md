@@ -68,7 +68,7 @@ FPS de jogo, no motor 0.1.9, em resolução interna 1x salvo indicação. **Só 
 
 | Máquina | CPU | GPU | FPS |
 |---|---|---|---|
-| **PC 1** | Ryzen 7 9800X3D | RTX 5080 | 60 travado (gameplay inicial, 1x) |
+| **PC 1** | Ryzen 7 9800X3D | RTX 5080 | 60 travado (gameplay inicial, 1x); 4x: ~57–58 em jogo |
 | **PC 2** | Core i5-11400F | RX 9060 XT | 1x: **~50 FPS** de média (com o motor 0.1.8 era ~34); medido com outro programa aberto |
 | **Notebook** | Core i5-10300H (4/8) | GTX 1650 | não medido |
 | **Portátil** | Legion Go S (Linux) | Radeon 780M | não suportado |
