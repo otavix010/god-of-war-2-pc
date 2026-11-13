@@ -91,7 +91,7 @@ function Anotar([string]$arq, [string]$texto, [switch]$Novo) {
 # roda um comando pelo cmd (stdout e stderr no log da etapa); falha = exceção com o fim do log
 function Exec([string]$log, [string]$linha) {
     Anotar $log "`r`n> $linha"
-    cmd /c "$linha >> `"$log`" 2>&1"
+    cmd /d /c "$linha >> `"$log`" 2>&1"
     if ($LASTEXITCODE -ne 0) {
         Write-Host (Get-Content $log -Tail 25 | Out-String) -ForegroundColor DarkGray
         throw "falhou (código $LASTEXITCODE): $linha`r`nlog completo: $log"
@@ -159,7 +159,7 @@ $TMPC = Join-Path $R 'out\tmp'
 New-Item -ItemType Directory -Force $TMPC | Out-Null
 function ComVS([string]$linha) { "call `"$VCVARS`" >nul && set `"TEMP=$TMPC`" && set `"TMP=$TMPC`" && $linha" }
 # sem o Windows SDK o CMake falha em "Detecting C compiler ABI" (RC Pass 1 failed, CMAKE_MT-NOTFOUND): avisa antes
-SemExcecao { cmd /c (ComVS 'where rc.exe mt.exe') *> $null }
+SemExcecao { cmd /d /c (ComVS 'where rc.exe mt.exe') *> $null }
 if ($LASTEXITCODE -ne 0) { throw 'falta o Windows SDK (rc.exe/mt.exe) no Visual Studio Build Tools. Abra o Visual Studio Installer > Modificar > marque "SDK do Windows 11" (ou 10) e gere de novo.' }
 
 # ---------------------------------------------------------------------------- disco
@@ -321,6 +321,11 @@ Etapa '2_disco' {
         if ((Test-Path -LiteralPath $cnf) -and ((Get-Content -Raw -LiteralPath $cnf) -match 'BOOT2\s*=\s*cdrom0?:\\?([^;\r\n]+)')) {
             $serial = [IO.Path]::GetFileName($Matches[1].Trim()) -replace '_', '-' -replace '\.', ''
             $qual = " Essa ISO é de outro jogo ou versão (serial $serial)."
+        }
+        if (-not $qual -and -not (Select-String -LiteralPath $LOG -Pattern '^extra.do: ' -Quiet)) {
+            # a extração não chegou ao fim e não disse por quê (ISO de outra versão o extrai_iso acusa antes, com a lista do que
+            # ela tem): não é ISO errada. Report 1140: um script de inicialização do Prompt de Comando (AutoRun) que encerrava o cmd
+            throw "a extração da ISO não chegou ao fim e o motivo não apareceu (não parece ser ISO errada). Confira o espaço livre no disco e se o antivírus não está bloqueando a pasta $T, e gere de novo. Se repetir, mande o log: $LOG"
         }
         throw "o executável $($JOGO.elf) não está nessa ISO.$qual Escolha a ISO do $($JOGO.nome), versão $($JOGO.versao)."
     }
