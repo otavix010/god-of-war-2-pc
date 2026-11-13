@@ -3,6 +3,23 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 13/11/2026 · 0.1.10
+### pt
+- **Resolução interna (2x/4x) de verdade**: a imagem final do jogo saía na resolução original ampliada, e por isso ficava pixelada mesmo em 4x. Agora sai na resolução escolhida, bem mais nítida.
+- **Imagem suavizada com resolução interna**: com 2x/4x e o escalonador "Nenhum", a imagem esticada para a tela ficava serrilhada; agora é suavizada.
+- **Medidor do F10 visível em tela cheia**: o medidor de desempenho não aparecia sobre o jogo em tela cheia; agora é desenhado pelo próprio jogo, no canto da imagem.
+- Motor 0.1.11: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Real internal resolution (2x/4x)**: the final image came out at the original resolution scaled up, so it looked pixelated even at 4x. It now renders at the chosen resolution, much sharper.
+- **Smoothed image with internal resolution**: with 2x/4x and the "None" scaler, the image stretched to the screen looked jagged; it is now smoothed.
+- **F10 overlay visible in fullscreen**: the performance overlay did not show over the game in fullscreen; it is now drawn by the game itself, in the corner of the image.
+- Engine 0.1.11: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Resolución interna (2x/4x) de verdad**: la imagen final del juego salía en la resolución original ampliada, y por eso se veía pixelada incluso en 4x. Ahora sale en la resolución elegida, mucho más nítida.
+- **Imagen suavizada con resolución interna**: con 2x/4x y el escalador "Ninguno", la imagen estirada a la pantalla se veía dentada; ahora se suaviza.
+- **Medidor de F10 visible en pantalla completa**: el medidor de rendimiento no aparecía sobre el juego en pantalla completa; ahora lo dibuja el propio juego, en la esquina de la imagen.
+- Motor 0.1.11: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 13/11/2026 · 0.1.9
 ### pt
 - **O vídeo de abertura volta a aparecer**: o ataque a Rodes, logo depois da cena do trono, era pulado e o jogo ia direto para a cidade. Agora ele toca inteiro, com som.
