@@ -3,6 +3,23 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 13/11/2026 · 0.1.9
+### pt
+- **O vídeo de abertura volta a aparecer**: o ataque a Rodes, logo depois da cena do trono, era pulado e o jogo ia direto para a cidade. Agora ele toca inteiro, com som.
+- **Corrigida uma causa de fechamento do jogo com o erro 0xC0000005** depois de alguns minutos de jogo: em certas cenas o motor lia memória fora do lugar ao enviar os gráficos.
+- **Geração mais robusta em alguns Windows**: quando o Prompt de Comando do Windows roda um script de inicialização próprio, a extração da ISO não acontecia e o gerador dizia, por engano, que a ISO não era a certa. Agora isso não interfere mais; e se a extração parar sem motivo claro, a mensagem não acusa mais a ISO.
+- Motor 0.1.10: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **The opening video is back**: the attack on Rhodes, right after the throne scene, was skipped and the game went straight to the city. It now plays in full, with sound.
+- **Fixed a cause of the game closing with error 0xC0000005** after a few minutes of play: in some scenes the engine read memory out of bounds while sending graphics.
+- **More reliable generation on some Windows setups**: when the Windows Command Prompt runs a startup script of its own, the ISO was not extracted and the generator wrongly said the ISO was not the right one. This no longer interferes; and if the extraction stops for no clear reason, the message no longer blames the ISO.
+- Engine 0.1.10: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **El video de apertura vuelve a aparecer**: el ataque a Rodas, justo después de la escena del trono, se saltaba y el juego iba directo a la ciudad. Ahora se reproduce completo, con sonido.
+- **Corregida una causa de cierre del juego con el error 0xC0000005** tras algunos minutos de juego: en ciertas escenas el motor leía memoria fuera de lugar al enviar los gráficos.
+- **Generación más robusta en algunos Windows**: cuando el Símbolo del sistema de Windows ejecuta un script de inicio propio, la ISO no se extraía y el generador decía, por error, que la ISO no era la correcta. Eso ya no interfiere; y si la extracción se detiene sin un motivo claro, el mensaje ya no culpa a la ISO.
+- Motor 0.1.10: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 12/11/2026 · 0.1.8
 ### pt
 - **Mais fps em processadores de 6 núcleos** (como Core i5 e Ryzen 5) com outros programas abertos: o motor não prende mais as tarefas principais em núcleos fixos do processador. Num Core i5-11400F com outro jogo aberto, a média em jogo foi de ~34 para ~50 fps.
