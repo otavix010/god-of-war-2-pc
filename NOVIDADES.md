@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 16/11/2026 · 0.1.13
+### pt
+- **Mais fps com resolução interna 4x**: a memória de vídeo da resolução interna foi reorganizada e o jogo ficou mais rápido em 4x (no PC de teste, de ~53 para ~55 fps no trecho medido). A imagem é a mesma.
+- Motor 0.1.14: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **More fps with 4x internal resolution**: the video memory used by the internal resolution was reorganized and the game got faster at 4x (on the test PC, from ~53 to ~55 fps in the measured section). The image is the same.
+- Engine 0.1.14: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Más fps con resolución interna 4x**: la memoria de vídeo de la resolución interna fue reorganizada y el juego quedó más rápido en 4x (en el PC de prueba, de ~53 a ~55 fps en el tramo medido). La imagen es la misma.
+- Motor 0.1.14: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 15/11/2026 · 0.1.12
 ### pt
 - **Primeira abertura sem "Não respondendo"**: na primeira vez depois de uma atualização, enquanto os gráficos eram preparados (pode levar alguns minutos num notebook), a janela parava de responder e o Windows oferecia fechá-la; agora ela continua respondendo e o título avisa que os gráficos estão sendo preparados.
