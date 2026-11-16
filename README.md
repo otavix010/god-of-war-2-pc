@@ -73,6 +73,21 @@ FPS de jogo, no motor 0.1.9, em resolução interna 1x salvo indicação. **Só 
 | **Notebook** | Core i5-10300H (4/8) | GTX 1650 | não medido |
 | **Portátil** | Legion Go S (Linux) | Radeon 780M | não suportado |
 
+### Por número de núcleos
+
+**No 1x, 60 FPS com 6 núcleos ou mais; com 4 núcleos ou menos fica entre ~45 e 60, conforme a cena.** No 4x, de 52 a 56 com 8 núcleos e acima de 40 até com 2.
+
+| Núcleos / threads | 1x (motor 0.1.13): FPS médio (mínimo) | 4x (motor 0.1.12): FPS médio |
+|---|---|---|
+| 8 / 16 | 59 (49) | 52–56 |
+| 6 / 12 | 60 (58) | 46–50 |
+| 4 / 8 | 46–57 (34–45) | 48–50 |
+| 4 / 4 | 52–60 (41–58) | 42–50 |
+| 2 / 4 | 45–53 (33–45) | 42–43 |
+
+**Como medimos:** Ryzen 7 9800X3D + RTX 5080, 1080p, com o jogo preso a menos núcleos pelo Windows (afinidade), média do começo do jogo em duas rodadas. Isso dá uma boa ideia, mas um processador fraco de verdade (menos cache, clock menor) pode render menos que um 9800X3D limitado. Entre rodadas há variação de 3 a 5 FPS.
+Com 4 núcleos ou menos no 1x a diferença entre rodadas chega a 14 FPS: depende do trecho do jogo.
+
 ## Problemas conhecidos
 
 - Em alguns PCs o vídeo de abertura pode travar de vez em quando (feche e abra de novo).
@@ -138,7 +153,7 @@ Depois de atualizar o port, `gerar.cmd -RefazerDe 3` baixa o motor novo, retradu
 
 A **native PC port** of *God of War II* (PlayStation 2, 2007) made by **static recompilation** with the project's own PS2 engine. **Beta.** It runs from the start with sound, videos and PS2-accurate graphics, at **60 FPS on current PCs**; on 4-core laptops use the **30 FPS mode**. The console's graphics chip (GS) runs on your GPU (OpenGL 4.3). Options in the launcher: 30/60 FPS, window or fullscreen (F11 / Alt+Enter), window size, internal resolution (1x, 2x or 4x), upscaler (bilinear, AMD FSR 1, NVIDIA Image Scaling) and sharpness, FXAA, aspect ratio 4:3, 16:9, 21:9 and 32:9 (ultrawide).
 
-**Platforms:** Windows 10/11 only for now (Linux is not supported yet; only the *God of War: Ascension* port has a Linux beta). Performance: measured on two PCs (Ryzen 7 9800X3D + RTX 5080, and Core i5-11400F + RX 9060 XT), see the table above; the laptop is not measured yet. **Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest).**
+**Platforms:** Windows 10/11 only for now (Linux is not supported yet; only the *God of War: Ascension* port has a Linux beta). Performance: measured on two PCs (Ryzen 7 9800X3D + RTX 5080, and Core i5-11400F + RX 9060 XT), see the table above; the laptop is not measured yet. **Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest).** Per CPU core count (9800X3D limited by affinity): 1x holds 60 FPS with 6+ cores and ~45–60 with 4 or fewer, depending on the scene; 4x runs 52–56 with 8 cores and above 40 even with 2.
 
 **Bring your own game**: no game code or data here, only the function map (addresses), translation settings and the VU1 "recipe" (offsets and sizes in your executable). You need the **US** release (SCUS-97481, Redump "God of War II (USA)") as an **.iso**. Install Visual Studio 2022 Build Tools with C++, CMake and Clang (commands above), download this repository to a path without spaces with about 15 GB free, double-click **`gerar.cmd`** (it checks your ISO, extracts the disc files, downloads the prebuilt engine package (no Git needed), translates the game code on your PC and builds it, in 5 to 30 minutes; 16 GB of RAM needed), then play with **`jogar.cmd`**.
 
