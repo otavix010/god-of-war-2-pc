@@ -1,7 +1,9 @@
 # Novidades do port
 
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
-"## 16/11/2026 · 0.1.14
+"## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
+
+## 16/11/2026 · 0.1.14
 ### pt
 - **Correção de um fechamento raro**: em cenas com geometria fora da tela o jogo podia fechar sozinho no meio da partida; o defeito foi achado num outro jogo em teste e corrigido no motor.
 - Motor 0.1.15: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
@@ -11,8 +13,6 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 ### es
 - **Corrección de un cierre raro**: en escenas con geometría fuera de la pantalla el juego podía cerrarse solo en medio de la partida; el defecto se encontró en otro juego en prueba y se corrigió en el motor.
 - Motor 0.1.15: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
-
-## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
 ## 16/11/2026 · 0.1.13
 ### pt
