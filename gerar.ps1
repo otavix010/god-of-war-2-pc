@@ -48,12 +48,12 @@ if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R
 $JOGO = Get-Content -Raw -Encoding UTF8 (Join-Path $R 'jogo\jogo.json') | ConvertFrom-Json
 
 # motor do port: pacote fechado (tradutor, bibliotecas do runtime, cabeçalhos e o build do jogo), um por versão
-$MOTOR_VERSAO = '0.1.15'
+$MOTOR_VERSAO = '0.1.21'
 $MOTOR_NOME = "otx-motor-ps2-$MOTOR_VERSAO"
 $MOTOR_URL = "https://github.com/otavix010/otx-motor-ps2/releases/download/v$MOTOR_VERSAO/$MOTOR_NOME.zip"
 # cópia no servidor do launcher (o mesmo arquivo; vem primeiro, o GitHub fica de reserva)
 $MOTOR_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/motor/ps2/$MOTOR_NOME.zip"
-$MOTOR_SHA256 = '2a565621a1277a96f00ed27a3fd196d2018126960661dc7d846062634257c748'
+$MOTOR_SHA256 = '3f120d1e8af8b804811be051a7e2e692de4eaadf7728376ea039aa03de8f4468'
 
 $T = Join-Path $R 'trabalho'
 $OUT = Join-Path $R 'out\gerar'
@@ -108,6 +108,51 @@ function Etapa([string]$nome, [scriptblock]$corpo) {
     Set-Content -Path $marca -Value (Get-Date) -Encoding UTF8
     Msg ("{0}: ok ({1:N0} s)" -f $nome, ((Get-Date) - $t0).TotalSeconds)
 }
+# ícone do jogo a partir da capa (a mesma imagem do perfil do launcher): baixa, encaixa num quadrado transparente e grava
+# um .ico com 256 px (PNG) e 64/48/32/16 px (DIB de 32 bits). Só na máquina de quem gera; nada vai para o repositório.
+function IconeDaCapa([string]$url, [string]$saida) {
+    Add-Type -AssemblyName System.Drawing
+    $tmp = "$saida.png"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 25
+    $src = [System.Drawing.Image]::FromFile($tmp)
+    try {
+        $partes = @()
+        foreach ($n in 256, 64, 48, 32, 16) {
+            $bmp = New-Object System.Drawing.Bitmap $n, $n, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.Clear([System.Drawing.Color]::Transparent)
+            $e = [math]::Min($n / $src.Width, $n / $src.Height)
+            $w = [int]($src.Width * $e); $h = [int]($src.Height * $e)
+            $g.DrawImage($src, [int](($n - $w) / 2), [int](($n - $h) / 2), $w, $h)
+            $g.Dispose()
+            $ms = New-Object IO.MemoryStream
+            if ($n -eq 256) { $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png) }
+            else {
+                $bw = New-Object IO.BinaryWriter $ms
+                $bw.Write([int]40); $bw.Write([int]$n); $bw.Write([int]($n * 2)); $bw.Write([int16]1); $bw.Write([int16]32)
+                $bw.Write([int]0); $bw.Write([int]0); $bw.Write([int]0); $bw.Write([int]0); $bw.Write([int]0); $bw.Write([int]0)
+                for ($y = $n - 1; $y -ge 0; $y--) { for ($x = 0; $x -lt $n; $x++) { $bw.Write([int]$bmp.GetPixel($x, $y).ToArgb()) } }
+                $linha = [int]([math]::Ceiling($n / 32.0) * 4)
+                $bw.Write((New-Object byte[] ($linha * $n)))
+                $bw.Flush()
+            }
+            $partes += , @($n, $ms.ToArray()); $bmp.Dispose()
+        }
+        $fs = [IO.File]::Create($saida); $o = New-Object IO.BinaryWriter $fs
+        $o.Write([int16]0); $o.Write([int16]1); $o.Write([int16]$partes.Count)
+        $pos = 6 + 16 * $partes.Count
+        foreach ($p in $partes) {
+            $n = $p[0]; $d = $p[1]
+            $o.Write([byte]($n % 256)); $o.Write([byte]($n % 256)); $o.Write([byte]0); $o.Write([byte]0); $o.Write([int16]1); $o.Write([int16]32)
+            $o.Write([int]$d.Length); $o.Write([int]$pos); $pos += $d.Length
+        }
+        foreach ($p in $partes) { $o.Write($p[1]) }
+        $o.Flush(); $fs.Close()
+    } finally { $src.Dispose(); Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+}
+
 function Sha1([string]$arq) {
     $r = Get-FileHash -Algorithm SHA1 -LiteralPath $arq -ErrorAction SilentlyContinue
     if (-not $r) { throw "não consegui ler `"$arq`" (aberto em outro programa, ainda baixando ou só na nuvem, sem cópia local?)" }
@@ -483,6 +528,15 @@ Etapa '6_compilar' {
     $pac = $PAC.Replace('\', '/')
     Msg "compilando o jogo ($Jobs compilações em paralelo, motor $VARIANTE; de 5 a 30 min)"
     $cfg = "`"-DOTX_PACOTE=$pac`" -DOTX_VARIANTE=$VARIANTE `"-DPS2X_VU1_LANCADOR=$lancador`""
+    # ícone do jogo (jogo\icone.ico): vira recurso do executável e ícone da janela (motor 0.1.21 em diante)
+    $ico = ((Join-Path $R 'jogo\icone.ico') -replace '\\', '/')
+    # com internet, o ícone vem da capa do jogo (jogo.json: icone_capa, a mesma do launcher); sem ela, fica o do port
+    if ($JOGO.icone_capa) {
+        $icoCapa = Join-Path $T 'icone_capa.ico'
+        if (-not (Test-Path -LiteralPath $icoCapa)) { try { IconeDaCapa $JOGO.icone_capa $icoCapa } catch { Anotar $LOG "ícone da capa não baixou ($_); fica o ícone do port" } }
+        if ((Test-Path -LiteralPath $icoCapa) -and (Get-Item -LiteralPath $icoCapa).Length -gt 1000) { $ico = ($icoCapa -replace '\\', '/') }
+    }
+    if (Test-Path -LiteralPath $ico) { $cfg += " `"-DOTX_ICONE=$ico`"" }
     Exec $LOG (ComVS "cmake -S `"$C`" -B `"$BJ`" -G Ninja $cfg")
     Exec $LOG (ComVS "cmake --build `"$BJ`" --target ps2EntryRunner --parallel $Jobs")
     if (-not (Test-Path (Join-Path $BJ 'ps2xRuntime\ps2EntryRunner.exe'))) { throw "o executável não foi gerado (veja $LOG)" }

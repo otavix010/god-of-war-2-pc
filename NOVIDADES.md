@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 17/11/2026 · 0.1.15
+### pt
+- **Ícone do jogo**: o executável, a janela (barra de tarefas e Alt+Tab) e o atalho na área de trabalho agora mostram o ícone do jogo, no lugar do ícone genérico. Na geração, o gerador baixa a capa do jogo e cria o ícone no seu PC; sem internet, usa um ícone próprio do port.
+- Motor 0.1.21, com correções gerais de compatibilidade achadas em outros jogos em teste: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Game icon**: the executable, the window (taskbar and Alt+Tab) and the desktop shortcut now show the game icon instead of the generic one. During generation the generator downloads the game cover and builds the icon on your PC; without internet it uses the port's own icon.
+- Engine 0.1.21, with general compatibility fixes found in other games under test: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Icono del juego**: el ejecutable, la ventana (barra de tareas y Alt+Tab) y el acceso directo del escritorio ahora muestran el icono del juego en lugar del genérico. En la generación, el generador descarga la carátula del juego y crea el icono en tu PC; sin internet, usa un icono propio del port.
+- Motor 0.1.21, con correcciones generales de compatibilidad encontradas en otros juegos en prueba: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 16/11/2026 · 0.1.14
 ### pt
 - **Correção de um fechamento raro**: em cenas com geometria fora da tela o jogo podia fechar sozinho no meio da partida; o defeito foi achado num outro jogo em teste e corrigido no motor.
