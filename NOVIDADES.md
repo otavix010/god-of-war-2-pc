@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 18/11/2026 · 0.1.16
+### pt
+- **Teclado e mouse**: dá para jogar sem controle e trocar as teclas na página **Controles** do Otavix Launcher. Por padrão, WASD move o personagem (analógico esquerdo), o mouse é o analógico direito e os botões do mouse são ataques; as setas são o direcional. O teclado soma ao controle: os dois funcionam juntos.
+- Motor 0.1.22, com correções gerais de compatibilidade achadas em outros jogos em teste: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Keyboard and mouse**: you can play without a controller and rebind the keys on the Otavix Launcher's **Controls** page. By default WASD moves the character (left stick), the mouse is the right stick and the mouse buttons are attacks; the arrow keys are the D-pad. The keyboard adds to the controller: both work together.
+- Engine 0.1.22, with general compatibility fixes found in other games under test: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Teclado y ratón**: se puede jugar sin mando y cambiar las teclas en la página **Controles** del Otavix Launcher. Por defecto, WASD mueve al personaje (stick izquierdo), el ratón es el stick derecho y los botones del ratón son ataques; las flechas son la cruceta. El teclado se suma al mando: los dos funcionan juntos.
+- Motor 0.1.22, con correcciones generales de compatibilidad encontradas en otros juegos en prueba: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 17/11/2026 · 0.1.15
 ### pt
 - **Ícone do jogo**: o executável, a janela (barra de tarefas e Alt+Tab) e o atalho na área de trabalho agora mostram o ícone do jogo, no lugar do ícone genérico. Na geração, o gerador baixa a capa do jogo e cria o ícone no seu PC; sem internet, usa um ícone próprio do port.

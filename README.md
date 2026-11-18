@@ -47,6 +47,27 @@ Problemas conhecidos: em alguns PCs o vídeo de abertura pode travar de vez em q
 
 Pelo [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest), no menu de opções do jogo: **30 ou 60 FPS**, janela ou **tela cheia** (no jogo, F11 ou Alt+Enter alternam), tamanho da janela, **resolução interna (1x, 2x ou 4x)**, escalonador (**bilinear, AMD FSR 1 ou NVIDIA Image Scaling**) e a nitidez dele, anti-serrilhamento **FXAA**, proporção 4:3, 16:9, 21:9 e 32:9 (ultrawide) e predefinições (Notebook / PC fraco, Equilibrado, Qualidade). Sem o launcher, as mesmas opções são variáveis de ambiente: `PS2X_QPS=30`, `PS2X_TELA_CHEIA=1`, `PS2X_JANELA_TAM=1920x1080`, `PS2X_RESOLUCAO=1|2|4`, `PS2X_ESCALA=nenhum|bilinear|fsr|nis`, `PS2X_NITIDEZ_PCT=0..100`, `PS2X_FXAA=1`, `PS2X_ASPECTO=4:3|16:9|21:9|32:9|tela|nativo`.
 
+## Teclado e mouse
+
+O teclado e o mouse funcionam junto com o controle. As teclas são trocadas na página **Controles** do
+[Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest), que também liga ou desliga o teclado e o mouse e ajusta a sensibilidade. Teclas padrão:
+
+| Botão do PlayStation 2 | Tecla padrão |
+|---|---|
+| Analógico esquerdo | W A S D |
+| Analógico direito | mouse (ou I J K L) |
+| Direcional | setas |
+| X | Espaço ou X |
+| Bola | C ou Esc |
+| Quadrado | botão esquerdo do mouse ou Z |
+| Triângulo | botão direito do mouse ou V |
+| L1 / R1 | Q / E |
+| L2 / R2 | Shift esquerdo / Shift direito |
+| L3 / R3 | F / botão do meio do mouse |
+| START / SELECT | Enter / Tab |
+
+O ponteiro do mouse só fica preso na janela depois da primeira tecla do jogo; Alt+Tab solta. F10 (medidor de desempenho), F11 e Alt+Enter (tela cheia) continuam sendo atalhos do port. Sem o launcher: `PS2X_TECLADO=0|1`, `PS2X_MOUSE=0|1`, `PS2X_MOUSE_SENS=5..200` e `PS2X_TECLAS="cross=space;square=mouse1 j;lstick_up=w"` (botão=teclas, separados por `;`).
+
 ## Plataformas
 
 | | **Windows** | **Linux / SteamOS** |
