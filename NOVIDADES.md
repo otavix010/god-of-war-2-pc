@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 19/11/2026 · 0.1.18
+### pt
+- **Aviso claro quando a imagem do disco não é ISO**: se o arquivo escolhido for CSO, ZSO, CHD, BIN de 2352 bytes por setor ou estiver incompleto, o gerador agora diz o que o arquivo parece ser e o tamanho dele, em vez de um erro genérico de leitura.
+- Motor 0.1.24: a tabela de funções agora cobre todo o código do executável do jogo (trechos no fim dele ficavam de fora e podiam travar o jogo; achado em outro jogo em teste). Na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Clear message when the disc image is not an ISO**: if the chosen file is a CSO, ZSO, CHD, 2352-byte-per-sector BIN or is incomplete, the generator now says what the file looks like and its size, instead of a generic read error.
+- Engine 0.1.24: the function table now covers all of the game executable's code (sections at its end were left out and could freeze the game; found in another game under test). On the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Aviso claro cuando la imagen del disco no es ISO**: si el archivo elegido es CSO, ZSO, CHD, BIN de 2352 bytes por sector o está incompleto, el generador ahora dice qué parece ser el archivo y su tamaño, en lugar de un error genérico de lectura.
+- Motor 0.1.24: la tabla de funciones ahora cubre todo el código del ejecutable del juego (tramos al final quedaban fuera y podían congelar el juego; hallado en otro juego en prueba). En la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 19/11/2026 · 0.1.17
 ### pt
 - **Aviso claro quando a janela não abre**: em PCs cujo driver de vídeo não oferece OpenGL 3.3 (driver genérico do Windows, Área de Trabalho Remota, máquina virtual) ou sem monitor ativo, o jogo agora explica o problema numa mensagem em vez de fechar com erro.
