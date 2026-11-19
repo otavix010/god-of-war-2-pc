@@ -48,12 +48,12 @@ if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R
 $JOGO = Get-Content -Raw -Encoding UTF8 (Join-Path $R 'jogo\jogo.json') | ConvertFrom-Json
 
 # motor do port: pacote fechado (tradutor, bibliotecas do runtime, cabeçalhos e o build do jogo), um por versão
-$MOTOR_VERSAO = '0.1.24'
+$MOTOR_VERSAO = '0.1.25'
 $MOTOR_NOME = "otx-motor-ps2-$MOTOR_VERSAO"
 $MOTOR_URL = "https://github.com/otavix010/otx-motor-ps2/releases/download/v$MOTOR_VERSAO/$MOTOR_NOME.zip"
 # cópia no servidor do launcher (o mesmo arquivo; vem primeiro, o GitHub fica de reserva)
 $MOTOR_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/motor/ps2/$MOTOR_NOME.zip"
-$MOTOR_SHA256 = '5f3e0928c48ff07de6d096d1fa4884684944aaf93474e48c86026df1cee550b4'
+$MOTOR_SHA256 = 'e502e07dedb250f276039564df1d1300ec42bf0df9c728e08b3c1b09d01682f1'
 
 $T = Join-Path $R 'trabalho'
 $OUT = Join-Path $R 'out\gerar'
@@ -213,7 +213,7 @@ function Escolher-Iso([string]$texto) {
         Add-Type -AssemblyName System.Windows.Forms
         $d = New-Object System.Windows.Forms.OpenFileDialog
         $d.Title = $texto
-        $d.Filter = 'Imagem de DVD (*.iso)|*.iso|Todos os arquivos (*.*)|*.*'
+        $d.Filter = 'Imagem do disco (*.iso;*.bin;*.img)|*.iso;*.bin;*.img|Todos os arquivos (*.*)|*.*'
         if ($d.ShowDialog() -eq 'OK') { return $d.FileName }
         return ''
     } catch { return (Read-Host $texto) }

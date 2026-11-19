@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 19/11/2026 · 0.1.19
+### pt
+- **Imagem .bin aceita**: além da .iso comum, o gerador e o jogo agora leem imagens .bin/.img de setores brutos (2352 bytes por setor, como as feitas por programas de cópia de CD). Imagens comprimidas (CSO, ZSO, CHD) continuam sem suporte: o gerador avisa qual é o formato.
+- Motor 0.1.25. Na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **.bin images accepted**: besides a regular .iso, the generator and the game now read raw-sector .bin/.img images (2352 bytes per sector, as made by CD copying programs). Compressed images (CSO, ZSO, CHD) are still not supported: the generator tells which format it is.
+- Engine 0.1.25. On the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Imagen .bin aceptada**: además de la .iso común, el generador y el juego ahora leen imágenes .bin/.img de sectores brutos (2352 bytes por sector, como las hechas por programas de copia de CD). Las imágenes comprimidas (CSO, ZSO, CHD) siguen sin soporte: el generador avisa cuál es el formato.
+- Motor 0.1.25. En la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 19/11/2026 · 0.1.18
 ### pt
 - **Aviso claro quando a imagem do disco não é ISO**: se o arquivo escolhido for CSO, ZSO, CHD, BIN de 2352 bytes por setor ou estiver incompleto, o gerador agora diz o que o arquivo parece ser e o tamanho dele, em vez de um erro genérico de leitura.
