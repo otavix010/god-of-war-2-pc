@@ -3,6 +3,17 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 19/11/2026 · 0.1.17
+### pt
+- **Aviso claro quando a janela não abre**: em PCs cujo driver de vídeo não oferece OpenGL 3.3 (driver genérico do Windows, Área de Trabalho Remota, máquina virtual) ou sem monitor ativo, o jogo agora explica o problema numa mensagem em vez de fechar com erro.
+- Motor 0.1.23, com correções gerais de compatibilidade achadas em outros jogos em teste: na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
+### en
+- **Clear message when the window cannot open**: on PCs whose graphics driver does not offer OpenGL 3.3 (Windows basic driver, Remote Desktop, virtual machine) or with no active display, the game now explains the problem in a message instead of closing with an error.
+- Engine 0.1.23, with general compatibility fixes found in other games under test: on the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
+### es
+- **Aviso claro cuando la ventana no se abre**: en PC cuyo controlador de vídeo no ofrece OpenGL 3.3 (controlador básico de Windows, Escritorio remoto, máquina virtual) o sin monitor activo, el juego ahora explica el problema en un mensaje en lugar de cerrarse con un error.
+- Motor 0.1.23, con correcciones generales de compatibilidad encontradas en otros juegos en prueba: en la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
+
 ## 18/11/2026 · 0.1.16
 ### pt
 - **Teclado e mouse**: dá para jogar sem controle e trocar as teclas na página **Controles** do Otavix Launcher. Por padrão, WASD move o personagem (analógico esquerdo), o mouse é o analógico direito e os botões do mouse são ataques; as setas são o direcional. O teclado soma ao controle: os dois funcionam juntos.
