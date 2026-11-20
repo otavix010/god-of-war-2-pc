@@ -6,12 +6,15 @@ O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atual
 ## 19/11/2026 · 0.1.19
 ### pt
 - **Imagem .bin aceita**: além da .iso comum, o gerador e o jogo agora leem imagens .bin/.img de setores brutos (2352 bytes por setor, como as feitas por programas de cópia de CD). Imagens comprimidas (CSO, ZSO, CHD) continuam sem suporte: o gerador avisa qual é o formato.
+- **Compilação presa em "build.ninja still dirty"**: arquivos com data no futuro (relógio do Windows errado) agora têm a data corrigida antes de compilar; se ainda assim o ninja não parar, o gerador compila sem a reconfiguração automática e, no último caso, pede para acertar a data e a hora do Windows.
 - Motor 0.1.25. Na próxima geração o gerador refaz da etapa 3 sozinho (o disco extraído continua valendo).
 ### en
 - **.bin images accepted**: besides a regular .iso, the generator and the game now read raw-sector .bin/.img images (2352 bytes per sector, as made by CD copying programs). Compressed images (CSO, ZSO, CHD) are still not supported: the generator tells which format it is.
+- **Build stuck on "build.ninja still dirty"**: files dated in the future (wrong Windows clock) now get their date fixed before compiling; if ninja still loops, the generator compiles without the automatic reconfiguration and, as a last resort, asks you to fix the Windows date and time.
 - Engine 0.1.25. On the next generation the generator redoes it from step 3 on its own (the extracted disc is kept).
 ### es
 - **Imagen .bin aceptada**: además de la .iso común, el generador y el juego ahora leen imágenes .bin/.img de sectores brutos (2352 bytes por sector, como las hechas por programas de copia de CD). Las imágenes comprimidas (CSO, ZSO, CHD) siguen sin soporte: el generador avisa cuál es el formato.
+- **Compilación atascada en "build.ninja still dirty"**: los archivos con fecha en el futuro (reloj de Windows incorrecto) ahora tienen la fecha corregida antes de compilar; si aun así ninja no se detiene, el generador compila sin la reconfiguración automática y, como último recurso, pide corregir la fecha y la hora de Windows.
 - Motor 0.1.25. En la próxima generación el generador rehace desde la etapa 3 solo (el disco extraído se mantiene).
 
 ## 19/11/2026 · 0.1.18

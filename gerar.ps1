@@ -521,6 +521,27 @@ if (-not $Jobs) {
     $Jobs = [math]::Max(1, [math]::Min([Environment]::ProcessorCount, [math]::Floor($livre / 3)))
 }
 $BJ = Join-Path $C 'out\jogo'
+# report 1397: arquivos com data no futuro (relógio do Windows atrasado ou acertado no meio da geração, zip extraído num
+# fuso a oeste) deixam o build.ninja sempre mais velho que as entradas dele, e o ninja reconfigura até desistir
+# ("manifest 'build.ninja' still dirty after 100 tries"). Traz essas datas para agora; devolve quantos arquivos.
+function Corrigir-Datas {
+    $agora = Get-Date; $n = 0
+    foreach ($p in $C, $PAC, (Join-Path $R 'jogo')) {
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        Get-ChildItem -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt $agora.AddMinutes(1) } |
+            ForEach-Object { try { $_.LastWriteTime = $agora; $n++ } catch { } }
+    }
+    return $n
+}
+# o texto apareceu no $LOG depois do byte $de (só a saída da última tentativa)
+function Novo-No-Log([long]$de, [string]$texto) {
+    try {
+        $fs = New-Object IO.FileStream($LOG, 'Open', 'Read', 'ReadWrite')
+        try { $null = $fs.Seek($de, 'Begin'); $s = (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+        return $s.Contains($texto)
+    } catch { return $false }
+}
 Etapa '6_compilar' {
     # os microprogramas do VU1 compilam com o clang-cl do Visual Studio se ele estiver instalado (mais rápido);
     # sem ele, com o próprio MSVC. O lançador é o otx_ferramentas.exe do motor (subcomando lanca; sem Python)
@@ -537,8 +558,29 @@ Etapa '6_compilar' {
         if ((Test-Path -LiteralPath $icoCapa) -and (Get-Item -LiteralPath $icoCapa).Length -gt 1000) { $ico = ($icoCapa -replace '\\', '/') }
     }
     if (Test-Path -LiteralPath $ico) { $cfg += " `"-DOTX_ICONE=$ico`"" }
+    $nf = Corrigir-Datas
+    if ($nf -gt 0) { Msg "$nf arquivo(s) com data no futuro (relógio do Windows ou fuso do zip): data corrigida para agora" }
     Exec $LOG (ComVS "cmake -S `"$C`" -B `"$BJ`" -G Ninja $cfg")
-    Exec $LOG (ComVS "cmake --build `"$BJ`" --target ps2EntryRunner --parallel $Jobs")
+    $l0 = (Get-Item -LiteralPath $LOG).Length
+    try { Exec $LOG (ComVS "cmake --build `"$BJ`" --target ps2EntryRunner --parallel $Jobs") }
+    catch {
+        if (-not (Novo-No-Log $l0 'still dirty after')) { throw }
+        # o laço do ninja mesmo assim (relógio muito atrasado, ou data no futuro fora da pasta do jogo, como os arquivos do
+        # CMake do Visual Studio): sem a regra que refaz o build.ninja, o ninja não tem o que comparar
+        Msg 'o ninja não parou de reconfigurar (datas dos arquivos ou relógio do Windows): compilando sem a reconfiguração automática'
+        $null = Corrigir-Datas
+        Exec $LOG (ComVS "cmake -S `"$C`" -B `"$BJ`" -G Ninja $cfg -DCMAKE_SUPPRESS_REGENERATION=ON")
+        $l1 = (Get-Item -LiteralPath $LOG).Length
+        try { Exec $LOG (ComVS "cmake --build `"$BJ`" --target ps2EntryRunner --parallel $Jobs") }
+        catch {
+            if (-not (Novo-No-Log $l1 'still dirty after')) { throw }
+            throw ("a compilação ficou presa reconfigurando (ninja: build.ninja still dirty).`r`n" +
+                   "  A data e a hora do Windows parecem erradas: acerte o relógio (Configurações > Hora e idioma > Definir a hora automaticamente) e gere de novo.`r`n" +
+                   "  The Windows date and time look wrong: fix the clock (Settings > Time & language > Set time automatically) and generate again.`r`n" +
+                   "  La fecha y la hora de Windows parecen incorrectas: corrige el reloj (Configuración > Hora e idioma > Establecer la hora automáticamente) y genera de nuevo.`r`n" +
+                   "  log: $LOG")
+        }
+    }
     if (-not (Test-Path (Join-Path $BJ 'ps2xRuntime\ps2EntryRunner.exe'))) { throw "o executável não foi gerado (veja $LOG)" }
 }
 
