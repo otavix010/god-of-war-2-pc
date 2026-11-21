@@ -358,7 +358,26 @@ Etapa '2_disco' {
         Msg "AVISO: a ISO não é a cópia testada (SHA-1 $h). Vou conferir o executável do jogo."
     }
     Msg 'extraindo os arquivos do disco para trabalho\disc'
-    Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
+    # 21/11 (reports 1415/1416): ISO de outro jogo que tem port nosso → dizer qual página usar no launcher
+    $IRMAOS = @{ 'SCUS97399' = 'God of War'; 'SCUS97481' = 'God of War II'; 'SLES52326' = 'Spawn: Armageddon';
+                 'SLUS21168' = 'Castlevania: Curse of Darkness'; 'SLUS20733' = 'Castlevania: Lament of Innocence' }
+    try { Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`"" }
+    catch {
+        $txtLog = Get-Content -LiteralPath $LOG -Raw -ErrorAction SilentlyContinue
+        if ($txtLog -match 'a ISO tem ([^\r\n]+)') {
+            $meu = ($JOGO.serial -replace '[^A-Za-z0-9]', '').ToUpper()
+            foreach ($s in ($Matches[1] -split ',\s*')) {
+                $k = ($s -replace '[^A-Za-z0-9]', '').ToUpper()
+                if ($k -ne $meu -and $IRMAOS.ContainsKey($k)) {
+                    $outro = $IRMAOS[$k]
+                    throw ("esta ISO é do $outro ($s), não do $($JOGO.nome).`r`n  Use a página do $outro no launcher (ou o port dele).`r`n" +
+                           "  This image is $outro ($s), not $($JOGO.nome). Use the $outro page in the launcher.`r`n" +
+                           "  Esta imagen es de $outro ($s), no de $($JOGO.nome). Usa la página de $outro en el launcher.")
+                }
+            }
+        }
+        throw
+    }
     if (-not (Test-Path -LiteralPath $ELF)) {
         # diz de que jogo a ISO é (o SYSTEM.CNF aponta o executável, cujo nome é o serial): ISO do jogo errado é o caso comum
         $cnf = Join-Path $T 'disc\SYSTEM.CNF'
@@ -379,7 +398,26 @@ Etapa '2_disco' {
         # o extrai_iso pula arquivo que já existe com o mesmo tamanho: um executável estragado de uma extração interrompida ficaria; extrai de novo
         Msg 'o executável extraído não confere: extraindo ele de novo'
         Remove-Item -LiteralPath $ELF -Force
-        Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`""
+        # 21/11 (reports 1415/1416): ISO de outro jogo que tem port nosso → dizer qual página usar no launcher
+    $IRMAOS = @{ 'SCUS97399' = 'God of War'; 'SCUS97481' = 'God of War II'; 'SLES52326' = 'Spawn: Armageddon';
+                 'SLUS21168' = 'Castlevania: Curse of Darkness'; 'SLUS20733' = 'Castlevania: Lament of Innocence' }
+    try { Exec $LOG "`"$FERR`" extrai_iso `"$Iso`" `"$T\disc`" --elf `"$($JOGO.elf)`"" }
+    catch {
+        $txtLog = Get-Content -LiteralPath $LOG -Raw -ErrorAction SilentlyContinue
+        if ($txtLog -match 'a ISO tem ([^\r\n]+)') {
+            $meu = ($JOGO.serial -replace '[^A-Za-z0-9]', '').ToUpper()
+            foreach ($s in ($Matches[1] -split ',\s*')) {
+                $k = ($s -replace '[^A-Za-z0-9]', '').ToUpper()
+                if ($k -ne $meu -and $IRMAOS.ContainsKey($k)) {
+                    $outro = $IRMAOS[$k]
+                    throw ("esta ISO é do $outro ($s), não do $($JOGO.nome).`r`n  Use a página do $outro no launcher (ou o port dele).`r`n" +
+                           "  This image is $outro ($s), not $($JOGO.nome). Use the $outro page in the launcher.`r`n" +
+                           "  Esta imagen es de $outro ($s), no de $($JOGO.nome). Usa la página de $outro en el launcher.")
+                }
+            }
+        }
+        throw
+    }
         $he = Sha1 $ELF
     }
     if ($JOGO.elf_sha1 -notcontains $he) {
@@ -397,6 +435,15 @@ Etapa '2_disco' {
             $pt = "Edição diferente (outra região/versão): o disco é $txtSerial e o port suporta só $($JOGO.serial) ($($JOGO.versao))."
             $en = "Different edition (another region/version): the disc is $txtSerial and this port only supports $($JOGO.serial)."
             $es = "Edición diferente (otra región/versión): el disco es $txtSerial y este port solo admite $($JOGO.serial)."
+            # 21/11 (reports 1415/1416): a imagem é de OUTRO jogo que tem port nosso → dizer qual página usar no launcher
+            $irmaos = @{ 'SCUS97399' = 'God of War'; 'SCUS97481' = 'God of War II'; 'SLES52326' = 'Spawn: Armageddon';
+                         'SLUS21168' = 'Castlevania: Curse of Darkness'; 'SLUS20733' = 'Castlevania: Lament of Innocence' }
+            if ($irmaos.ContainsKey($lido)) {
+                $outro = $irmaos[$lido]
+                $pt = "Esta imagem é do $outro ($txtSerial), não do $($JOGO.nome). Use a página do $outro no launcher (ou o port dele)."
+                $en = "This image is $outro ($txtSerial), not $($JOGO.nome). Use the $outro page in the launcher (or its port)."
+                $es = "Esta imagen es de $outro ($txtSerial), no de $($JOGO.nome). Usa la página de $outro en el launcher (o su port)."
+            }
         } else {
             $pt = "Executável modificado: o disco é $txtSerial, mas o executável não é o original da versão suportada ($($JOGO.versao)). Pode ser uma cópia com patch, tradução ou hack, ou outra tiragem do disco."
             $en = "Modified executable: the disc is $txtSerial, but its executable is not the original one of the supported version. It may be a patched, translated or hacked copy, or another print of the disc."
