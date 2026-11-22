@@ -346,6 +346,41 @@ if ($usoFerr -notmatch 'extrai_iso' -or $usoFerr -notmatch '\blanca\b') { throw 
 
 # ---------------------------------------------------------------------------- disco (extração)
 Etapa '2_disco' {
+    # 22/11 (reports 1434/1447): letra do drive de uma ISO montada ou de um DVD, ou pasta com a .iso dentro
+    if (Test-Path -LiteralPath $Iso -PathType Container) {
+        $pasta = (Resolve-Path -LiteralPath $Iso).Path
+        $raiz = [IO.Path]::GetPathRoot($pasta)
+        if ($raiz -match '^[A-Za-z]:' -and $pasta.TrimEnd('\') -eq $raiz.TrimEnd('\')) {
+            # sem volume (drive de rede, subst) ou volume que não é imagem (DVD, disco): segue sem imagem
+            $imagens = @()
+            try { $imagens = @(Get-Volume -DriveLetter $raiz[0] -ErrorAction Stop | Get-DiskImage -ErrorAction Stop |
+                               Where-Object { $_.ImagePath } | ForEach-Object { $_.ImagePath }) } catch { $imagens = @() }
+            if ($imagens.Count -ge 1) {
+                # não usa a imagem: o launcher abre o jogo com o caminho escolhido (PS2X_CD_IMAGE = {iso}) e o jogo receberia a letra do drive
+                throw ("$raiz é a ISO montada no Windows, não o arquivo .iso.`r`n" +
+                       "  Escolha o próprio arquivo: $($imagens[0])`r`n" +
+                       "  Choose the file itself: $($imagens[0])`r`n" +
+                       "  Elige el propio archivo: $($imagens[0])")
+            } elseif (Test-Path -LiteralPath (Join-Path $raiz 'SYSTEM.CNF')) {
+                throw ("$raiz é um disco de PS2, não o arquivo .iso.`r`n" +
+                       "  O jogo está num DVD no leitor: crie antes a ISO do DVD (ImgBurn ou outro programa de cópia: `"criar arquivo de imagem a partir do disco`") e escolha o arquivo .iso ($($JOGO.serial)).`r`n" +
+                       "  The game is a DVD in the drive: first make an ISO of the DVD (ImgBurn or another copy program: `"create image file from disc`") and choose the .iso file ($($JOGO.serial)).`r`n" +
+                       "  El juego está en un DVD en la unidad: primero crea la ISO del DVD (ImgBurn u otro programa de copia: `"crear archivo de imagen desde el disco`") y elige el archivo .iso ($($JOGO.serial)).")
+            }
+        } else {
+            $isos = @(Get-ChildItem -LiteralPath $pasta -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq '.iso' -and $_.Length -ge 100MB })
+            if ($isos.Count -eq 1) {
+                Msg "$pasta é uma pasta; vou usar a ISO dela / is a folder; using its ISO: $($isos[0].Name)"
+                $Iso = $isos[0].FullName
+            } elseif ($isos.Count -gt 1) {
+                $nomes = ($isos | ForEach-Object { $_.Name }) -join ', '
+                throw ("$pasta é uma pasta com $($isos.Count) ISOs ($nomes).`r`n" +
+                       "  Escolha o arquivo .iso do $($JOGO.nome) ($($JOGO.serial)), não a pasta.`r`n" +
+                       "  Choose the $($JOGO.nome) .iso file ($($JOGO.serial)), not the folder.`r`n" +
+                       "  Elige el archivo .iso de $($JOGO.nome) ($($JOGO.serial)), no la carpeta.")
+            }
+        }
+    }
     if (Test-Path -LiteralPath $Iso -PathType Container) { throw "$Iso é uma pasta, não a ISO: escolha o arquivo .iso do jogo (imagem do DVD original, $($JOGO.serial); cópias ripadas/dubladas em pasta não servem)" }
     if (-not (Test-Path -LiteralPath $Iso -PathType Leaf)) { throw "a ISO não existe: $Iso (escolha o arquivo .iso de novo)" }
     $Iso = (Resolve-Path -LiteralPath $Iso).Path
