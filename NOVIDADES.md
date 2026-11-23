@@ -3,6 +3,14 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 23/11/2026 · 0.1.21
+### pt
+- **Pasta do port copiada ou movida depois de gerar**: a compilação parava no CMake ("CMakeCache.txt directory ... is different"). Agora o gerador apaga a compilação antiga e compila de novo na pasta nova.
+### en
+- **Port folder copied or moved after generating**: the build stopped in CMake ("CMakeCache.txt directory ... is different"). The generator now deletes the old build and builds again in the new folder.
+### es
+- **Carpeta del port copiada o movida después de generar**: la compilación se detenía en CMake ("CMakeCache.txt directory ... is different"). Ahora el generador borra la compilación anterior y compila de nuevo en la carpeta nueva.
+
 ## 22/11/2026 · 0.1.20
 ### pt
 - **ISO montada no Windows**: escolhida pela letra do drive (por exemplo, F:\), o gerador agora mostra o caminho do arquivo .iso para escolher no lugar dela.
