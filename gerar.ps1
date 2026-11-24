@@ -48,12 +48,12 @@ if ($R -match ' ') { throw "Coloque o projeto numa pasta sem espaços (agora: $R
 $JOGO = Get-Content -Raw -Encoding UTF8 (Join-Path $R 'jogo\jogo.json') | ConvertFrom-Json
 
 # motor do port: pacote fechado (tradutor, bibliotecas do runtime, cabeçalhos e o build do jogo), um por versão
-$MOTOR_VERSAO = '0.1.25'
+$MOTOR_VERSAO = '0.1.34'
 $MOTOR_NOME = "otx-motor-ps2-$MOTOR_VERSAO"
 $MOTOR_URL = "https://github.com/otavix010/otx-motor-ps2/releases/download/v$MOTOR_VERSAO/$MOTOR_NOME.zip"
 # cópia no servidor do launcher (o mesmo arquivo; vem primeiro, o GitHub fica de reserva)
 $MOTOR_ESPELHO = "https://otavix-launcher.otavix-launcher-servidor.workers.dev/v1/arquivos/motor/ps2/$MOTOR_NOME.zip"
-$MOTOR_SHA256 = 'e502e07dedb250f276039564df1d1300ec42bf0df9c728e08b3c1b09d01682f1'
+$MOTOR_SHA256 = '87a396211bddad41e7621887c83a261c7c64558e5c0723f7ef3edf8d9bc4a02d'
 
 $T = Join-Path $R 'trabalho'
 $OUT = Join-Path $R 'out\gerar'

@@ -3,6 +3,14 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 24/11/2026 · 0.1.22
+### pt
+- **Salvar e carregar o estado (save state)**, como nos emuladores, em 9 espaços: F5 salva, F8 carrega, F6/F7 trocam o espaço; no controle, segure Select e aperte RB (salvar) ou LB (carregar). Um aviso na tela confirma. Os estados valem para esta versão do port; dá para desligar na página Controles do launcher.
+### en
+- **Save states**, like in emulators, in 9 slots: F5 saves, F8 loads, F6/F7 change the slot; on the controller, hold Select and press RB (save) or LB (load). An on-screen notice confirms it. States work for this port version; they can be turned off in the launcher's Controls page.
+### es
+- **Guardar y cargar el estado (save state)**, como en los emuladores, en 9 espacios: F5 guarda, F8 carga, F6/F7 cambian el espacio; en el mando, mantén Select y pulsa RB (guardar) o LB (cargar). Un aviso en pantalla lo confirma. Los estados valen para esta versión del port; se pueden desactivar en la página Controles del launcher.
+
 ## 23/11/2026 · 0.1.21
 ### pt
 - **Pasta do port copiada ou movida depois de gerar**: a compilação parava no CMake ("CMakeCache.txt directory ... is different"). Agora o gerador apaga a compilação antiga e compila de novo na pasta nova.

@@ -68,6 +68,15 @@ O teclado e o mouse funcionam junto com o controle. As teclas são trocadas na p
 
 O ponteiro do mouse só fica preso na janela depois da primeira tecla do jogo; Alt+Tab solta. F10 (medidor de desempenho), F11 e Alt+Enter (tela cheia) continuam sendo atalhos do port. Sem o launcher: `PS2X_TECLADO=0|1`, `PS2X_MOUSE=0|1`, `PS2X_MOUSE_SENS=5..200` e `PS2X_TECLAS="cross=space;square=mouse1 j;lstick_up=w"` (botão=teclas, separados por `;`).
 
+## Salvar e carregar o estado (save state)
+
+Além do save do próprio jogo (cartão de memória), dá para salvar o momento exato e voltar a ele, como nos emuladores, em 9 espaços:
+
+- **Teclado:** F5 salva, F8 carrega, F6 e F7 trocam o espaço.
+- **Controle:** segure **Select** e aperte **RB** para salvar, **LB** para carregar, e esquerda/direita no direcional para trocar o espaço. O Select usado nessas combinações não chega ao jogo; sozinho, ele funciona normalmente.
+
+Um aviso curto na tela confirma ("Estado salvo no espaço 3"). Não dá para salvar durante um vídeo; o aviso diz quando. Os estados ficam em `estados\` na pasta do port e valem só para a mesma versão do port: depois de uma atualização, os estados antigos são recusados (os saves do cartão continuam valendo). Carregar um estado não volta o cartão de memória no tempo. Desligar: na página **Controles** do launcher, ou `PS2X_ESTADOS=0`.
+
 ## Plataformas
 
 | | **Windows** | **Linux / SteamOS** |
@@ -172,7 +181,7 @@ Depois de atualizar o port, `gerar.cmd -RefazerDe 3` baixa o motor novo, retradu
 
 ## English summary
 
-A **native PC port** of *God of War II* (PlayStation 2, 2007) made by **static recompilation** with the project's own PS2 engine. **Beta.** It runs from the start with sound, videos and PS2-accurate graphics, at **60 FPS on current PCs**; on 4-core laptops use the **30 FPS mode**. The console's graphics chip (GS) runs on your GPU (OpenGL 4.3). Options in the launcher: 30/60 FPS, window or fullscreen (F11 / Alt+Enter), window size, internal resolution (1x, 2x or 4x), upscaler (bilinear, AMD FSR 1, NVIDIA Image Scaling) and sharpness, FXAA, aspect ratio 4:3, 16:9, 21:9 and 32:9 (ultrawide).
+A **native PC port** of *God of War II* (PlayStation 2, 2007) made by **static recompilation** with the project's own PS2 engine. **Beta.** It runs from the start with sound, videos and PS2-accurate graphics, at **60 FPS on current PCs**; on 4-core laptops use the **30 FPS mode**. The console's graphics chip (GS) runs on your GPU (OpenGL 4.3). **Save states** in 9 slots: F5 saves, F8 loads, F6/F7 change the slot (controller: hold Select + RB / LB / D-pad left-right); they work only with the same port version. Options in the launcher: 30/60 FPS, window or fullscreen (F11 / Alt+Enter), window size, internal resolution (1x, 2x or 4x), upscaler (bilinear, AMD FSR 1, NVIDIA Image Scaling) and sharpness, FXAA, aspect ratio 4:3, 16:9, 21:9 and 32:9 (ultrawide).
 
 **Platforms:** Windows 10/11 only for now (Linux is not supported yet; only the *God of War: Ascension* port has a Linux beta). Performance: measured on two PCs (Ryzen 7 9800X3D + RTX 5080, and Core i5-11400F + RX 9060 XT), see the table above; the laptop is not measured yet. **Easiest: the [Otavix Launcher](https://github.com/otavix010/otavix-launcher/releases/latest).** Per CPU core count (9800X3D limited by affinity): 1x holds 60 FPS with 6+ cores and ~45–60 with 4 or fewer, depending on the scene; 4x runs 52–56 with 8 cores and above 40 even with 2.
 
