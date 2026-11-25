@@ -3,6 +3,14 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 25/11/2026 · 0.1.23
+### pt
+- **Motor PS2 0.1.36:** o primeiro save state da sessão ficou instantâneo (antes levava cerca de 1 s). Estados salvos na versão anterior não carregam nesta; o aviso na tela explica.
+### en
+- **PS2 engine 0.1.36:** the first save state of a session is now instant (it used to take about 1 s). States saved in the previous version do not load in this one; the on-screen notice explains it.
+### es
+- **Motor PS2 0.1.36:** el primer save state de la sesión ahora es instantáneo (antes tardaba cerca de 1 s). Los estados guardados en la versión anterior no cargan en esta; el aviso en pantalla lo explica.
+
 ## 24/11/2026 · 0.1.22
 ### pt
 - **Salvar e carregar o estado (save state)**, como nos emuladores, em 9 espaços: F5 salva, F8 carrega, F6/F7 trocam o espaço; no controle, segure Select e aperte RB (salvar) ou LB (carregar). Um aviso na tela confirma. Os estados valem para esta versão do port; dá para desligar na página Controles do launcher.
