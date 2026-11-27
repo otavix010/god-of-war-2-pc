@@ -3,6 +3,14 @@
 O Otavix Launcher mostra este arquivo na página "Novidades" do jogo. Cada atualização tem um título
 "## <data> · <versão>" e o texto em português (### pt), inglês (### en) e espanhol (### es). As mais novas ficam em cima.
 
+## 27/11/2026 · 0.1.24
+### pt
+- **Motor PS2 0.1.37:** o save state ficou mais confiável ao carregar um estado na mesma sessão: agora ele guarda também a textura que estava sendo enviada ao GS e a máscara de profundidade, e as texturas não ficam mais com blocos ou lixo colorido depois da carga. Estados salvos na versão anterior não carregam nesta; o aviso na tela explica.
+### en
+- **PS2 engine 0.1.37:** save states are more reliable when loading a state in the same session: they now also keep the texture that was being sent to the GS and the depth mask, and textures no longer show blocks or colored garbage after loading. States saved in the previous version do not load in this one; the on-screen notice explains it.
+### es
+- **Motor PS2 0.1.37:** el save state es más fiable al cargar un estado en la misma sesión: ahora guarda también la textura que se estaba enviando al GS y la máscara de profundidad, y las texturas ya no quedan con bloques ni basura de colores después de cargar. Los estados guardados en la versión anterior no cargan en esta; el aviso en pantalla lo explica.
+
 ## 25/11/2026 · 0.1.23
 ### pt
 - **Motor PS2 0.1.36:** o primeiro save state da sessão ficou instantâneo (antes levava cerca de 1 s). Estados salvos na versão anterior não carregam nesta; o aviso na tela explica.
